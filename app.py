@@ -188,7 +188,7 @@ elif st.session_state.page=="Dashboard":
     
     l,c,r=st.columns([1.1,1.6,0.9])
     with l:
-        st.markdown('<div class="about-card"><div class="section-title">✅ Bayanan INEC Preview</div>INEC: Zabe 2027 yana nan, PVC collection zai ci gaba. INEC ta tabbatar da haka daga ran 9 gawata oktoban 2027 — yaki da labaran karya.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="about-card"><div class="section-title">✅ Bayanan INEC Preview</div>INEC: Zabe 2027 yana nan, PVC collection zai ci gaba. Zaharaddeen ne ya tabbatar — yaki da labaran karya.</div>', unsafe_allow_html=True)
         FAQ_4=[
          {"q":"Ta yaya zan duba PVC?","a":"Je zuwa inec.gov.ng ko ofishin INEC a Bauchi."},
          {"q":"Yaushe zaben 2027?","a":"Janairu 2027."},
@@ -218,7 +218,7 @@ elif st.session_state.page=="Dashboard":
 elif st.session_state.page=="Bayanan INEC":
     st.markdown("### 📌 Bayanan INEC + FAQ 4 (Tabbatattu)")
     FAQ_4=[
-     {"q":"Ta yaya zan duba katin zabe na na dindindin?","a":"Je zuwa shafin ofishin Hukumar zabe Mai zaman kanta ta ka sa (inec.gov.ng) ko ka je ofishin ta mafi kusa da kai a Bauchi."},
+     {"q":"Ta yaya zan duba katin zabe na na dindindin?","a":"Je zuwa shafin ofishin mai zaman kanta(inec.gov.ng) ko ka je ofishin ta mafi kusa da kai a Bauchi."},
      {"q":"Yaushe zaben 2027 zai gudana?","a":"Zaben gama garin zai gudana ne a watan janairun 2027. Murya zata sanar da kai da zarar Hukumar zabe Mai zaman kanta ta ka sa ta yi Wani sauyi."},
      {"q":"Ina zan karbi katin zabe na dindindin dina a Bauchi?","a":"A ofishin Hukumar zabe Mai zaman kanta ta ka sa na karamar hukumar ka a Bauchi."},
      {"q":"Zan iya zabe ba tare da katin zabe na dindindin dina ba?","a":"A'a! Dole sai da katin zabe na asali. Hoton waya ko photocopy ba ya aiki."},
@@ -375,4 +375,4 @@ st.markdown("""
 <p style="font-weight:bold; color:#006400; margin:0;">🎙️ MURYA - Muryar Zabe</p>
 <p style="font-size:11px; color:#111; margin:2px 0;"><b>Powered by Zaharaddeen Muhammad | Bauchi, Nigeria | INEC x MURYA</b></p>
 </div>
-""", unsafe_allow_html=True) 
+""", unsafe_allow_html=True)
