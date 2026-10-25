@@ -375,4 +375,4 @@ st.markdown("""
 <p style="font-weight:bold; color:#006400; margin:0;">🎙️ MURYA - Muryar Zabe</p>
 <p style="font-size:11px; color:#111; margin:2px 0;"><b>Powered by Zaharaddeen Muhammad | Bauchi, Nigeria | INEC x MURYA</b></p>
 </div>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=True) 
