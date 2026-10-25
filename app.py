@@ -1,5 +1,5 @@
 import streamlit as st
-import csv, os
+import csv, os, re
 from datetime import datetime
 from gtts import gTTS
 
@@ -9,11 +9,10 @@ st.markdown("""
 <style>
 .big-title {font-size:32px; font-weight:bold; color:#006400; text-align:center;}
 .subtitle {text-align:center; color:#555; font-size:13px;}
-.card {background:#f0fdf4; padding:15px; border-radius:12px; border:1px solid #bbf7d0; margin:10px 0;}
 .footer {text-align:center; padding:20px; background:#f0fdf4; border-radius:12px; margin-top:30px; border:1px solid #bbf7d0;}
 </style>
 <div class="big-title">🎙️ MURYA</div>
-<div class="subtitle">Muryar Zabe - Bauchi | Zaharaddeen Muhammad | AI4Elections</div>
+<div class="subtitle">Muryar Zabe - Bauchi | Zaharaddeen Muhammad</div>
 """, unsafe_allow_html=True)
 
 FILE = "murya_strong.csv"
@@ -23,9 +22,9 @@ if not os.path.exists(FILE):
 
 FAQ_4 = [
     {"q": "Yaya zan duba PVC dina?", "a": "Je zuwa shafin INEC ko ka je ofishin INEC na kusa da kai a Bauchi. Tafi da lambar VIN dinka."},
-    {"q": "Yaushe zabe 2027 zai gudana?", "a": "INEC har yanzu ba ta fitar da ranar karshe ba. Murya zata sanar da kai da zarar INEC ta tabbatar. Ka guji labaran karya."},
+    {"q": "Yaushe zabe 2027 zai gudana?", "a": "INEC har yanzu ba ta fitar da ranar karshe ba. Murya zata sanar da kai da zarar INEC ta tabbatar."},
     {"q": "Ina zan karbi PVC dina a Bauchi?", "a": "A ofishin INEC na karamar hukumar ka a Bauchi. Dole sai da katin dan kasa."},
-    {"q": "Zan iya zabe ba tare da PVC ba?", "a": "A'a! Dole sai da katin zabe na asali. Hoton waya ko photocopy ba ya aiki a rumfar zabe."},
+    {"q": "Zan iya zabe ba tare da PVC ba?", "a": "A'a! Dole sai da katin zabe na asali. Hoton waya ba ya aiki."},
 ]
 
 def get_data():
@@ -49,123 +48,89 @@ def add_a(idx, a):
         w.writerow(["tambaya","amsa","lokaci","status"])
         w.writerows(data)
 
-# --- FINAL: CAPITALS = ENGLISH LETTERS + HAUSA-FIRST + PUNCTUATION ---
+# --- FINAL: HAUSA VOICE + CAPITALS CALL AS ENGLISH ---
 def clean_for_voice(text):
-    # Keep ? . ! , for natural pause
+    # Keep punctuation ? . !
+    # Convert CAPITALS to spaced letters so Hausa voice calls as English letters
     text = text.replace("voters.inecnigeria.org", "shafin INEC")
-    text = text.replace("www.", "").replace("https://", "").replace("http://", "")
     
-    # EVERY CAPITAL PLACE = CALL AS ENGLISH LETTERS
-    # PVC -> P V C (English), INEC -> I N E C (English)
-    replacements = {
-        "PVC": " P V C ",
-        "INEC": " I N E C ",
-        "VIN": " V I N ",
-        "LGA": " L G A ",
-    }
-    # Do case-insensitive replacement but keep English call
-    for k, v in replacements.items():
-        text = text.replace(k, v)
-        text = text.replace(k.lower(), v)
-        text = text.replace(k.capitalize(), v)
+    # CAPITALS = ENGLISH LETTERS CALL inside Hausa voice
+    # PVC -> P V C, INEC -> I N E C, VIN -> V I N, LGA -> L G A
+    text = re.sub(r'\bPVC\b', ' P V C ', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bINEC\b', ' I N E C ', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bVIN\b', ' V I N ', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bLGA\b', ' L G A ', text, flags=re.IGNORECASE)
     
-    return text
+    # Clean double spaces
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 def detect_by_text(text):
-    # HAUSA-FIRST: If any Hausa word exists, it's Hausa
-    t = text.lower().strip()
-    t_clean = t.replace("?"," ").replace("."," ").replace("!"," ").replace(","," ").replace("'"," ")
+    # Hausa-first detection by written text
+    t = text.lower()
+    t_clean = re.sub(r'[?.!,]', ' ', t)
     words = t_clean.split()
-    
-    hausa_dict = [
-        "yaya","ina","me","mene","menene","wanene","yaushe","yau","gobe","jiya",
-        "zan","zai","zaa","nan","can","su","mu","ku","ni","kai","ke","ita","shi",
-        "suna","muna","kuna","yake","nake","take","don","domin","kuma","amma",
-        "idan","sai","daga","zuwa","cikin","akan","ba","ne","ce","da","ko",
-        "shin","eh","a'a","gaskiya","lafiya","gida","aiki","makaranta","kudi",
-        "zabe","bauchi","karbi","duba","tafi","je","zo","nawa","yanzu","tukuna","kawai"
-    ]
-    
-    ha_count = sum(1 for w in words if w in hausa_dict)
-    if ha_count >= 1:
+    hausa_dict = ["yaya","ina","me","mene","menene","wanene","yaushe","yau","gobe","zan","zai","nan","can","su","mu","ku","ni","kai","ke","ita","shi","suna","muna","kuna","yake","nake","don","domin","kuma","amma","idan","sai","daga","zuwa","cikin","akan","ba","ne","ce","da","ko","shin","gida","aiki","zabe","bauchi","karbi","duba","tafi","je","zo","nawa","yanzu"]
+    if any(w in words for w in hausa_dict):
         return "ha"
     return "en"
 
-def speak_auto(text, name):
+def speak_auto(text, base_name):
     cleaned = clean_for_voice(text)
     lang = detect_by_text(text)
+    
     try:
-        gTTS(cleaned, lang=lang, slow=False).save(name)
-        st.audio(name)
-    except Exception:
+        # Use detected language voice - if Hausa sentence, use Hausa voice
+        # But cleaned text has P V C which Hausa voice will call as English letters
+        gTTS(cleaned, lang=lang, slow=False).save(f"{base_name}.mp3")
+        st.audio(f"{base_name}.mp3")
+    except:
         try:
-            gTTS(cleaned, lang="en", slow=False).save(name)
-            st.audio(name)
+            gTTS(cleaned, lang="en", slow=False).save(f"{base_name}.mp3")
+            st.audio(f"{base_name}.mp3")
         except:
-            st.caption("🔊 Sauti na bukatar internet kadan")
+            st.caption("🔊 Sauti na bukatar internet")
 
-# --- TABS ---
-tab_info, tab_ask, tab_admin = st.tabs(["📌 Bayanan INEC + FAQ 4", "👥 Tambaya + Sauti", "🔐 Admin Direct"])
+tab_info, tab_ask, tab_admin = st.tabs(["📌 Bayanan INEC + FAQ 4", "👥 Tambaya + Sauti", "🔐 Admin"])
 
 with tab_info:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("✅ Bayanan INEC Tabbatattu")
-    st.markdown("""
-    **Murya tana yaki da labaran karya.**
-    - ✅ INEC: Zabe 2027 yana nan
-    - ✅ PVC collection zai ci gaba  
-    - ✅ Zaharaddeen ne ya tabbatar
-    """)
-    st.markdown('</div>', unsafe_allow_html=True)
-    
     col1, col2, col3 = st.columns(3)
     data = get_data()
     col1.metric("Tambayoyi", len(data))
     col2.metric("Amsoshi", len([r for r in data if len(r)>1 and r[1].strip()!=""]))
     col3.metric("Jira", len([r for r in data if len(r)<2 or r[1].strip()==""]))
-    
     st.markdown("---")
-    st.subheader("📌 FAQ 4 - Tun Farko")
     for i, faq in enumerate(FAQ_4):
         st.markdown(f"**Q{i+1}: {faq['q']}**")
         st.success(f"A: {faq['a']}")
         if st.button(f"🔊 Sauti", key=f"faq_{i}", use_container_width=True):
-            speak_auto(faq['a'], f"faq_{i}.mp3")
+            speak_auto(faq['a'], f"faq_{i}")
         st.markdown("---")
 
 with tab_ask:
-    st.subheader("👥 Amsoshin Zaharaddeen Kai Tsaye + Murya")
     rows = get_data()
     answered = [r for r in rows if len(r)>1 and r[1].strip()!=""]
-    if not answered:
-        st.warning("Babu amsa tukuna — Zaharaddeen zai amsa kai tsaye.")
-    else:
-        for i, r in enumerate(reversed(answered)):
-            st.markdown(f"**Q:** {r[0]}")
-            st.success(f"**A:** {r[1]}")
-            if st.button(f"🔊 Sauti", key=f"ans_{i}", use_container_width=True):
-                speak_auto(r[1], f"ans_{i}.mp3")
-            st.caption(f"🕒 {r[2] if len(r)>2 else ''} | ✅ Human-verified")
-            st.markdown("---")
+    for i, r in enumerate(reversed(answered)):
+        st.markdown(f"**Q:** {r[0]}")
+        st.success(f"**A:** {r[1]}")
+        if st.button(f"🔊 Sauti", key=f"ans_{i}", use_container_width=True):
+            speak_auto(r[1], f"ans_{i}")
+        st.markdown("---")
 
-    st.markdown("### ✍️ Yi Sabuwar Tambaya")
     if "just_sent" not in st.session_state:
         st.session_state.just_sent = False
-    if "last_q" not in st.session_state:
         st.session_state.last_q = ""
-    if "clear_flag" not in st.session_state:
         st.session_state.clear_flag = False
     if st.session_state.clear_flag:
         st.session_state.q_box = ""
         st.session_state.clear_flag = False
     if st.session_state.just_sent:
-        st.success(f"✅ YA TAFI! Tambayarka ta tafi: '{st.session_state.last_q}'")
+        st.success(f"✅ YA TAFI! '{st.session_state.last_q}'")
         st.balloons()
 
-    lang = st.radio("Harshe:", ["Hausa", "English"], horizontal=True, key="lang_choice")
-    placeholder = "Yaya zan duba PVC dina a Bauchi?" if lang=="Hausa" else "Please check my PVC status in Bauchi"
-    q = st.text_area("Tambayarka:", placeholder=placeholder, key="q_box")
-
+    lang = st.radio("Harshe:", ["Hausa", "English"], horizontal=True)
+    ph = "Yaya zan duba PVC dina a Bauchi?" if lang=="Hausa" else "Please check my PVC"
+    q = st.text_area("Tambayarka:", placeholder=ph, key="q_box")
     if st.button("🚀 Aika Tambaya", use_container_width=True, type="primary"):
         if q.strip():
             add_q(q.strip())
@@ -173,46 +138,22 @@ with tab_ask:
             st.session_state.just_sent = True
             st.session_state.clear_flag = True
             st.rerun()
-        else:
-            st.warning("⚠️ Rubuta tambaya da farko")
 
 with tab_admin:
-    st.subheader("🔐 Naka Kadai — Amsa Kai Tsaye")
     pw = st.text_input("Password:", type="password")
     if pw == "bauchi2027":
-        st.success("Barka da zuwa, Zaharaddeen!")
         rows = get_data()
         pending = [(i, r) for i, r in enumerate(rows) if len(r)<2 or r[1].strip()==""]
-        if not pending:
-            st.info("Babu sabbin tambayoyi — duk an amsa!")
-        else:
-            st.warning(f"Akwai {len(pending)} sabuwar tambaya tana jira")
-            for idx, r in pending:
-                st.markdown(f"**Tambaya #{idx+1}:** {r[0]}")
-                ans = st.text_area(f"Rubuta Amsa:", key=f"adm_{idx}")
-                colA, colB = st.columns(2)
-                with colA:
-                    if st.button(f"✅ Buga Kai Tsaye", key=f"btn_{idx}", use_container_width=True, type="primary"):
-                        if ans.strip():
-                            add_a(idx, ans.strip())
-                            st.success("🔥 YES! Amsa ta shiga app!")
-                            st.balloons()
-                            st.rerun()
-                with colB:
-                    if ans.strip():
-                        if st.button(f"🔊 Sauti", key=f"test_{idx}", use_container_width=True):
-                            speak_auto(ans.strip(), f"test_{idx}.mp3")
-                st.markdown("---")
-    elif pw != "":
-        st.error("Password kuskure!")
+        for idx, r in pending:
+            st.markdown(f"**{r[0]}**")
+            ans = st.text_area("Amsa:", key=f"adm_{idx}")
+            if st.button(f"✅ Buga", key=f"btn_{idx}", use_container_width=True):
+                if ans.strip():
+                    add_a(idx, ans.strip())
+                    st.rerun()
+            if ans.strip():
+                if st.button(f"🔊 Sauti", key=f"test_{idx}", use_container_width=True):
+                    speak_auto(ans.strip(), f"test_{idx}")
 
 st.markdown("---")
-st.markdown("""
-<div class='footer'>
-<p style='font-weight:bold; color:#006400; margin:0; font-size:18px;'>🎙️ MURYA - Muryar Zabe</p>
-<p style='font-size:13px; color:#333; margin:6px 0;'>Powered by <b>Zaharaddeen Muhammad</b> | Bauchi, Nigeria</p>
-<p style='font-size:12px; color:#555; margin:8px 0;'>Murya is generated for people that have language & literacy barriers — Hausa voice 🔊, simple text.</p>
-<p style='font-size:11px; color:#777;'>Track: Electoral Inclusion + Information Integrity | AI4Elections 2027</p>
-<p style='font-size:11px; color:#006400; margin-top:10px; font-weight:bold;'>✅ No AI Hallucination — Verified by Zaharaddeen directly</p>
-</div>
-""", unsafe_allow_html=True)
+st.markdown("<div class='footer'><b>🎙️ MURYA - Muryar Zabe</b><br>Powered by Zaharaddeen Muhammad | Hausa voice 🔊 + CAPITALS as P V C English call</div>", unsafe_allow_html=True)
