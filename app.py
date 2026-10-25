@@ -3,9 +3,9 @@ import csv, os
 from datetime import datetime
 from gtts import gTTS
 
-st.set_page_config(page_title="Murya - Bauchi Voice", page_icon="🎙️", layout="centered")
+st.set_page_config(page_title="Murya - Bauchi Voice", layout="centered")
 
-# --- STRONG UI ---
+# --- KEEP ALL EMOJIS IN UI ---
 st.markdown("""
 <style>
 .big-title {font-size:32px; font-weight:bold; color:#006400; text-align:center;}
@@ -20,16 +20,24 @@ st.markdown("---")
 
 FILE = "murya_strong.csv"
 if not os.path.exists(FILE):
-    with open(FILE, "w", newline='', encoding='utf-8') as f:
+    with open(FILE, "w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow(["tambaya","amsa","lokaci","status"])
+
+# --- YOUR 4 FAQ FROM FIRST TIME - WITH EMOJIS KEPT ---
+FAQ_4 = [
+    {"q": "Yaya zan duba PVC dina?", "a": "Je zuwa voters.inecnigeria.org ko ka je ofishin INEC na kusa da kai a Bauchi. Tafi da lambar VIN dinka."},
+    {"q": "Yaushe zabe 2027 zai gudana?", "a": "INEC har yanzu ba ta fitar da ranar karshe ba. Murya zata sanar da kai da zarar INEC ta tabbatar. Ka guji labaran karya."},
+    {"q": "Ina zan karbi PVC dina a Bauchi?", "a": "A ofishin INEC na karamar hukumar ka. Kowane LGA a Bauchi tana da ofishi. Dole sai da katin dan kasa."},
+    {"q": "Zan iya zabe ba tare da PVC ba?", "a": "A'a. Dole sai da PVC na asali. Hoton waya ko photocopy ba ya aiki a rumfar zabe."},
+]
 
 def get_data():
     if not os.path.exists(FILE): return []
-    with open(FILE, "r", encoding='utf-8') as f:
+    with open(FILE, "r", encoding="utf-8") as f:
         return list(csv.reader(f))[1:]
 
 def add_q(t):
-    with open(FILE, "a", newline='', encoding='utf-8') as f:
+    with open(FILE, "a", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow([t, "", datetime.now().strftime("%Y-%m-%d %H:%M"), "NEW"])
 
 def add_a(idx, a):
@@ -38,7 +46,7 @@ def add_a(idx, a):
         data[idx][1] = a
         data[idx][2] = datetime.now().strftime("%Y-%m-%d %H:%M")
         data[idx][3] = "ANSWERED"
-    with open(FILE, "w", newline='', encoding='utf-8') as f:
+    with open(FILE, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["tambaya","amsa","lokaci","status"])
         w.writerows(data)
@@ -46,15 +54,15 @@ def add_a(idx, a):
 def speak(text, name):
     try:
         try:
-            gTTS(text, lang='ha').save(name)
+            gTTS(text, lang="ha").save(name)
         except:
-            gTTS(text, lang='en').save(name)
+            gTTS(text, lang="en").save(name)
         st.audio(name)
     except:
         st.caption("🔊 Sauti na bukatar internet kadan — amma amsa a rubuce tana nan.")
 
-# --- TABS - STRONG APP ---
-tab_info, tab_ask, tab_admin = st.tabs(["📌 Bayanan INEC", "👥 Tambaya + Sauti", "🔐 Admin Direct"])
+# --- KEEP ALL EMOJIS IN TABS ---
+tab_info, tab_ask, tab_admin = st.tabs(["📌 Bayanan INEC + FAQ 4", "👥 Tambaya + Sauti", "🔐 Admin Direct"])
 
 with tab_info:
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -73,10 +81,20 @@ with tab_info:
     col2.metric("Amsoshi", len([r for r in data if len(r)>1 and r[1].strip()!=""]))
     col3.metric("Jira Amsa", len([r for r in data if len(r)<2 or r[1].strip()==""]))
     
+    st.markdown("---")
+    st.subheader("📌 FAQ 4 - Tun Farko (Always There)")
+    st.caption("Wadannan 4 tambayoyi ne muka sanya tun farko — suna nan koyaushe.")
+    for i, faq in enumerate(FAQ_4):
+        st.markdown(f"**Q{i+1}: {faq['q']}**")
+        st.success(f"A: {faq['a']}")
+        if st.button(f"🔊 Ji Sauti FAQ {i+1}", key=f"faq_{i}"):
+            speak(faq['a'], f"faq_{i}.mp3")
+        st.markdown("---")
+    
     st.info("🎯 Track: Electoral Inclusion (Hausa Voice, low-literacy) + Information Integrity (Human-in-loop)")
 
 with tab_ask:
-    st.subheader("Amsoshin Zaharaddeen Kai Tsaye + Murya")
+    st.subheader("👥 Amsoshin Zaharaddeen Kai Tsaye + Murya")
     rows = get_data()
     answered = [r for r in rows if len(r)>1 and r[1].strip()!=""]
     if not answered:
@@ -87,10 +105,10 @@ with tab_ask:
             st.success(f"**A:** {r[1]}")
             c1, c2 = st.columns([1,2])
             with c1:
-                if st.button(f"🔊 Sauti", key=f"v_{i}_{r[2]}"):
+                if st.button(f"🔊 Sauti", key=f"v_{i}_{r[2] if len(r)>2 else i}"):
                     speak(r[1], f"ans_{i}.mp3")
             with c2:
-                st.caption(f"🕒 {r[2]} | Status: {r[3] if len(r)>3 else 'ANSWERED'}")
+                st.caption(f"🕒 {r[2] if len(r)>2 else ''} | Status: {r[3] if len(r)>3 else 'ANSWERED'}")
             st.markdown("---")
 
     st.markdown("### ✍️ Yi Sabuwar Tambaya")
