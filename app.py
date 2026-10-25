@@ -188,7 +188,7 @@ elif st.session_state.page=="Dashboard":
     
     l,c,r=st.columns([1.1,1.6,0.9])
     with l:
-        st.markdown('<div class="about-card"><div class="section-title">✅ Bayanan INEC Preview</div>INEC: Zabe 2027 yana nan, PVC collection zai ci gaba.
+        st.markdown(<div class="about-card"><div class="section-title">✅ Bayanan INEC Preview</div>INEC: Zabe 2027 yana nan, PVC collection zai ci gaba.
 INEC ta tabbatar da haka daga ran 9 gawata oktoban 2027 — yaki da labaran karya.</div>', unsafe_allow_html=True)
         FAQ_4=[
          {"q":"Ta yaya zan duba PVC?","a":"Je zuwa inec.gov.ng ko ofishin INEC a Bauchi."},
