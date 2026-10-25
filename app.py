@@ -158,4 +158,4 @@ with tab_admin:
                             speak(ans.strip(), f"test_{idx}.mp3")
                 st.markdown("---")
     elif pw != "":
-        st.error("Password kuskure! Saka: bauchi2027")
+        st.error("Password kuskure! Saka: bauchi2027") 
