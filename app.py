@@ -23,7 +23,7 @@ if not os.path.exists(FILE):
     with open(FILE, "w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow(["tambaya","amsa","lokaci","status"])
 
-# --- YOUR 4 FAQ FROM FIRST TIME - WITH EMOJIS KEPT ---
+# --- YOUR 4 FAQ - WITH EMOJIS KEPT ---
 FAQ_4 = [
     {"q": "Yaya zan duba PVC dina?", "a": "Je zuwa voters.inecnigeria.org ko ka je ofishin INEC na kusa da kai a Bauchi. Tafi da lambar VIN dinka."},
     {"q": "Yaushe zabe 2027 zai gudana?", "a": "INEC har yanzu ba ta fitar da ranar karshe ba. Murya zata sanar da kai da zarar INEC ta tabbatar. Ka guji labaran karya."},
