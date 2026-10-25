@@ -1,29 +1,52 @@
 import streamlit as st
-from gtts import gTTS
 
-st.set_page_config(page_title="Murya - Ref 37")
+st.set_page_config(
+    page_title="Murya - Tambayoyi kan Zabe",
+    layout="centered"
+)
+
+st.markdown("""
+<style>
+h1 { color: #008751; }
+.stButton>button { background-color: #008751; color: white; border-radius: 8px; padding: 0.5em 1em; }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("Murya")
-st.caption("Ref 37 | Zaharaddeen Muhammad | Bauchi | AI4Elections")
+st.markdown("Ref: Zaharaddeen Muhammad | Bauchi | AI4Elections")
+st.markdown("---")
 
-data = {
-    "Yaushe ne zaben 2027?": "Zaben Najeriya zai gudana a watan Janairu 2027. Hukumar INEC zata sanar da takamaiman rana.",
-    "Ina zan kada kuri'a?": "Duba katin zaben ka/ki. Akwai lambar rumfar zabe a jiki. Ko ka/ki ziyarci shafin inec.gov.ng. Domin neman karin bayani",
-    "Menene zan dauka zuwa wajen zabe?": "Dauki katin zaben ka/ki PVC din ka/ki kawai. Kar ka/ki manta.",
-    "Yadda ake gujewa labaran karya": "Kada ka/ki yada labari ba tare da tabbatarwa ba. Duba shafin INEC na gaskiya(inec.gov.ng) kafin ka/ki yada."
+st.markdown("### Zabi tambaya:")
+
+questions = [
+    "Yaushe ne zaben 2027?",
+    "Ta yaya zan yi rajista don zabe?",
+    "Ina zan kada kuri'ata?",
+    "Wane takarda ake bukata?",
+    "Yaushe ne ranar karshe ta rajista?"
+]
+
+selected = st.selectbox("Zabi tambaya daga nan:", questions)
+
+st.markdown("### Amsa:")
+
+answers = {
+    "Yaushe ne zaben 2027?": "Zaben Najeriya zai gudana a watan Janairu - Fabrairu 2027. Hukumar INEC zata sanar da takamaiman rana. Bi www.inecnigeria.org don sabuntawa.",
+    "Ta yaya zan yi rajista don zabe?": "Je zuwa ofishin INEC mafi kusa da kai ko ka yi rajista online a cvr.inecnigeria.org. Ka tafi da katin dan kasa ko takardar shaida.",
+    "Ina zan kada kuri'ata?": "Zaka kada kuri'a a rumfar zaben da ka yi rajista. Duba katin zabenka (PVC) don wurin rumfarka.",
+    "Wane takarda ake bukata?": "Katin Zabe (PVC) shine mafi muhimmanci. Idan baka da shi, ka je INEC don sabon kati kafin ranar karshe.",
+    "Yaushe ne ranar karshe ta rajista?": "INEC zata sanar da ranar karshe. Yawanci watanni 6 kafin zabe. Kada ka jira!"
 }
 
-q = st.selectbox("Zabi tambaya:", list(data.keys()))
-a = data[q]
+st.info(answers.get(selected))
 
-st.subheader("Amsa:")
-st.info(a)
+if st.button("Saurara a Hausa"):
+    st.success(answers.get(selected))
 
-if st.button("Saurara a Hausa", type="primary"):
-    with st.spinner("Ana shirya murya..."):
-        tts = gTTS(text=a, lang='ha')
-        tts.save("murya.mp3")
-    st.audio("murya.mp3")
-    st.success("Murya ta yi magana!")
+st.markdown("---")
+st.markdown("**Sako:**")
+st.text_area("Rubuta tambayarka:", placeholder="Misali: Yaya zan canza wurin zabe na?")
+st.button("Aika Tambaya")
 
-st.divider()
-st.write("Uses only public INEC data | No phone data stored | Responsible AI")
+st.markdown("---")
+st.caption("Uses only public INEC data | No phone data stored | Responsible AI | Made in Bauchi")
