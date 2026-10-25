@@ -1,2 +1,4 @@
-streamlit
-gtts
+streamlit>=1.40
+gTTS
+pandas
+requests
