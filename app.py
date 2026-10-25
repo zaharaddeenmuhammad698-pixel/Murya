@@ -218,4 +218,4 @@ An yi ta ne domin masu matsalar harshe da karatu a Bauchi — Hausa murya, sauki
 <p style='font-size:11px; color:#777; margin:5px 0;'>Track: Electoral Inclusion + Information Integrity | AI4Elections 2027 | #MuryaForBauchi</p>
 <p style='font-size:11px; color:#006400; margin-top:10px; font-weight:bold;'>✅ No AI Hallucination — All answers verified by Zaharaddeen directly</p>
 </div>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=True) 
