@@ -193,9 +193,9 @@ elif st.session_state.page=="Dashboard":
          {"q":"Ta yaya zan duba PVC?","a":"Je zuwa inec.gov.ng ko ofishin INEC a Bauchi."},
          {"q":"Yaushe zaben 2027?","a":"Janairu 2027."},
          {"q":"Ina zan karbi PVC?","a":"Ofishin INEC na LGA."},
-         {"q":"Zan iya zabe ba tare da PVC ba?","a":"A'a! Dole sai da asali."},
+         {"q":"Zan iya zabe ba tare da PVC ba?","a":"A'! Dole sai da asali."},
         ]
-        for i,f in enumerate(FAQ_4): st.markdown(f'<div class="about-card"><b>Q{i+1}: {f["q"]}</b><br><span style="color:#006400;">A: {f["a"]}</span></div>', unsafe_allow_html=True)
+        for i,f in enumerate(FAQs_4): st.markdown(f'<div class="about-card"><b>Q{i+1}: {f["q"]}</b><br><span style="color:#006400;">A: {f["a"]}</span></div>', unsafe_allow_html=True)
     with c:
         st.markdown('<div class="about-card"><div class="section-title">💬 Chat Preview + Voice</div>', unsafe_allow_html=True)
         st.markdown('<div class="voice-tip"><b>🎤 Ga wanda bai iya rubutu ba</b> — kamar WhatsApp.</div>', unsafe_allow_html=True)
