@@ -1,9 +1,9 @@
 [theme]
-base="light"
-primaryColor="#006400"
-backgroundColor="#ffffff"
-secondaryBackgroundColor="#f0fdf4"
-textColor="#000000"
+primaryColor = "#0b5d2e"
+backgroundColor = "#f5f8f6"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#12261a"
+font = "sans serif"
 
-[client]
-toolbarMode="minimal"
+[server]
+maxUploadSize = 10
