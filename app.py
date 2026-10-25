@@ -22,10 +22,10 @@ if not os.path.exists(FILE):
         csv.writer(f).writerow(["tambaya","amsa","lokaci","status"])
 
 FAQ_4 = [
-    {"q": "Yaya zan duba PVC dina?", "a": "Je zuwa shafin ofishin mai zaman kanta(inec.gov.ng) ko ka je ofishin ta mafi kusa da kai a Bauchi. Tafi da lambar VIN dinka."},
-    {"q": "Yaushe zabe 2027 zai gudana?", "a": "Zaben gama garin zai gudana ne a watan janairun 2027. Murya zata sanar da kai da zarar INEC ta yi Wani sauyi. Ka guji labaran karya."},
-    {"q": "Ina zan karbi PVC dina a Bauchi?", "a": "A ofishin INEC na karamar hukumar ka a Bauchi. Dole sai da katin dan kasa ko temporary voter card."},
-    {"q": "Zan iya zabe ba tare da PVC ba?", "a": "A'a! Dole sai da katin zabe na asali. Hoton waya ko photocopy ba ya aiki a rumfar zabe."},
+    {"q": "Yaya zan duba PVC dina?", "a": "Je zuwa shafin ofishin mai zaman kanta(inec.gov.ng) ko ka je ofishin ta mafi kusa da kai a Bauchi. Tafi da lambar shaida na mai zabe naka."},
+    {"q": "Yaushe zaben 2027 zai gudana?", "a": "Zaben gama garin zai gudana ne a watan janairun 2027. Murya zata sanar da kai da zarar Hukumar zabe Mai zaman ta ta kasa ta yi Wani sauyi. Ka guji labaran karya."},
+    {"q": "Ina zan karbi katin zabe na dindindin dina a Bauchi?", "a": "A ofishin Hukumar zabe Mai zaman ta ta kasa na karamar hukumar ka a Bauchi. Dole sai da katin dan kasa ko da katin zabe na wucen gadi."},
+    {"q": "Zan iya zabe ba tare da katin zabe na dindindin dina ba?", "a": "A'a! Dole sai da katin zabe na asali. Hoton waya ko photocopy ba ya aiki a rumfar zabe."},
 ]
 
 def get_data():
