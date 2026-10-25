@@ -22,7 +22,7 @@ if not os.path.exists(FILE):
         csv.writer(f).writerow(["tambaya","amsa","lokaci","status"])
 
 FAQ_4 = [
-    {"q": "Yaya zan duba PVC dina?", "a": "Je zuwa shafin INEC ko ka je ofishin INEC na kusa da kai a Bauchi. Tafi da lambar VIN dinka."},
+    {"q": "Yaya zan duba pvc dina?", "a": "Je zuwa shafin inec ko ka je ofishin INEC na kusa da kai a Bauchi. Tafi da lambar VIN dinka."},
     {"q": "Yaushe zabe 2027 zai gudana?", "a": "INEC har yanzu ba ta fitar da ranar karshe ba. Murya zata sanar da kai da zarar INEC ta tabbatar. Ka guji labaran karya."},
     {"q": "Ina zan karbi PVC dina a Bauchi?", "a": "A ofishin INEC na karamar hukumar ka a Bauchi. Dole sai da katin dan kasa."},
     {"q": "Zan iya zabe ba tare da PVC ba?", "a": "A'a! Dole sai da katin zabe na asali. Hoton waya ko photocopy ba ya aiki a rumfar zabe."},
