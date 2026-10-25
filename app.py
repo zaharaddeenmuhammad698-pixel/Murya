@@ -5,7 +5,6 @@ from gtts import gTTS
 
 st.set_page_config(page_title="Murya - Bauchi Voice", layout="centered", page_icon="🎙️")
 
-# --- CREATE VOICE FOLDERS ---
 os.makedirs("voice_notes/incoming", exist_ok=True)
 os.makedirs("voice_notes/replies", exist_ok=True)
 
@@ -15,6 +14,53 @@ st.markdown("""
 .subtitle {text-align:center; color:#555; font-size:13px;}
 .card {background:#f0fdf4; padding:15px; border-radius:12px; border:1px solid #bbf7d0; margin:10px 0;}
 .footer {text-align:center; padding:20px; background:#f0fdf4; border-radius:12px; margin-top:30px; border:1px solid #bbf7d0;}
+
+/* --- PROFESSIONAL VOICE HOLDER --- */
+.voice-holder {
+    background: linear-gradient(135deg, #006400 0%, #228B22 100%);
+    padding: 25px;
+    border-radius: 20px;
+    text-align: center;
+    color: white;
+    margin: 15px 0;
+    box-shadow: 0 8px 20px rgba(0,100,0,0.3);
+}
+.voice-holder h2 {color: white !important; font-size: 26px; margin: 0;}
+.voice-holder p {color: #e0ffe0; font-size: 16px; margin: 5px 0;}
+.step-box {
+    background: white;
+    color: #006400;
+    padding: 12px;
+    border-radius: 12px;
+    margin: 10px 0;
+    font-weight: bold;
+    font-size: 18px;
+    border-left: 6px solid #FFD700;
+    text-align: left;
+}
+.pulse {
+    animation: pulse 1.5s infinite;
+}
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+/* Make the audio_input BIG */
+div[data-testid="stAudioInput"] {
+    background: white;
+    padding: 15px;
+    border-radius: 15px;
+    border: 3px dashed #FFD700;
+}
+div[data-testid="stAudioInput"] button {
+    background: #006400 !important;
+    color: white !important;
+    height: 70px !important;
+    font-size: 20px !important;
+    border-radius: 12px !important;
+    width: 100% !important;
+}
 </style>
 <div class="big-title">🎙️ MURYA</div>
 <div class="subtitle">Muryar Zabe - Bauchi | Zaharaddeen Muhammad | AI4Elections</div>
@@ -26,7 +72,7 @@ if not os.path.exists(FILE):
         csv.writer(f).writerow(["tambaya","amsa","lokaci","status"])
 
 FAQ_4 = [
-    {"q": "Ta yaya zan duba katin zabe na na dindindin?", "a": "Je zuwa shafin ofishin Hukumar zabe Mai zaman   kan ta (inec.gov.ng) ko ka je ofishin ta mafi kusa da kai a Bauchi. Tafi da lambar shaida na mai zabe naka."},
+    {"q": "Ta yaya zan duba katin zabe na na dindindin?", "a": "Je zuwa shafin ofishin mai zaman kanta(inec.gov.ng) ko ka je ofishin ta mafi kusa da kai a Bauchi. Tafi da lambar shaida na mai zabe naka."},
     {"q": "Yaushe zaben 2027 zai gudana?", "a": "Zaben gama garin zai gudana ne a watan janairun 2027. Murya zata sanar da kai da zarar Hukumar zabe Mai zaman kanta ta ka sa ta yi Wani sauyi. Ka guji labaran karya."},
     {"q": "Ina zan karbi katin zabe na dindindin dina a Bauchi?", "a": "A ofishin Hukumar zabe Mai zaman kanta ta ka sa na karamar hukumar ka a Bauchi. Dole sai da katin dan kasa ko da katin zabe na wucen gadi."},
     {"q": "Zan iya zabe ba tare da katin zabe na dindindin dina ba?", "a": "A'a! Dole sai da katin zabe na asali. Hoton waya ko photocopy ba ya aiki a rumfar zabe."},
@@ -78,7 +124,7 @@ def speak_auto(text, name):
         except:
             st.caption("🔊 Sauti na bukatar internet kadan")
 
-tab_info, tab_ask, tab_admin = st.tabs(["📌 Bayanan INEC + FAQ 4", "👥 Tambaya + Sauti", "🔐 Admin Direct"])
+tab_info, tab_ask, tab_admin = st.tabs(["📌 Bayanan INEC", "👥 Tambaya + Sauti", "🔐 Admin"])
 
 with tab_info:
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -91,7 +137,7 @@ with tab_info:
     col2.metric("Amsoshi", len([r for r in data if len(r)>1 and r[1].strip()!=""]))
     col3.metric("Jira", len([r for r in data if len(r)<2 or r[1].strip()==""]))
     st.markdown("---")
-    st.subheader("📌 FAQ 4 - Tun Farko")
+    st.subheader("📌 FAQ 4")
     for i, faq in enumerate(FAQ_4):
         st.markdown(f"**Q{i+1}: {faq['q']}**")
         st.success(f"A: {faq['a']}")
@@ -100,94 +146,91 @@ with tab_info:
         st.markdown("---")
 
 with tab_ask:
-    # --- VOICE FOR ILLITERATE - CRASH-FREE VERSION ---
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("### 🎤 Ga Wanda Bai Iya Rubutu Ba")
-    st.markdown("**Ba sai ka iya rubutu ba!** Danna ka yi magana kamar WhatsApp. Danna mic ka yi recording.")
+    # --- PROFESSIONAL VOICE HOLDER - NEW DESIGN ---
+    st.markdown("""
+    <div class="voice-holder">
+        <h2>🎤 GA WANDA BAI IYA RUBUTU BA</h2>
+        <p>Ba sai ka iya rubutu ba! Yi magana kawai kamar WhatsApp</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="step-box">👉 Mataki 1: Danna ja button a kasa</div>', unsafe_allow_html=True)
+    st.markdown('<div class="step-box">👉 Mataki 2: Yi magana da Hausa - misali "Ina zan karbi PVC dina?"</div>', unsafe_allow_html=True)
+    st.markdown('<div class="step-box">👉 Mataki 3: Danna STOP - Shikenan! An tura</div>', unsafe_allow_html=True)
+
+    # The actual recorder - now inside professional holder
+    st.markdown('<div style="background:#fffde7; padding:15px; border-radius:15px; border:2px solid #FFD700;">', unsafe_allow_html=True)
+    st.markdown("**🎙️ DANNA NAN DOMIN YI MAGANA:**")
+    voice_data = st.audio_input("", key="murya_voice_main")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    voice_data = st.audio_input("🎤 DANNA NAN KA YI MAGANA - Murya")
-    
     if voice_data:
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         fpath = f"voice_notes/incoming/Murya_{ts}.wav"
         with open(fpath, "wb") as f:
             f.write(voice_data.getbuffer())
-        st.success("✅ Mun karba muryarka! Zaharaddeen zai amsa da muryarsa anjima.")
+        st.markdown("""
+        <div style="background:#d4edda; padding:20px; border-radius:15px; text-align:center; border:3px solid #006400; margin-top:15px;">
+            <h2 style="color:#006400; margin:0;">✅ MUN KARBA!</h2>
+            <p style="font-size:18px; color:#155724; font-weight:bold;">Nagode! Muryarka ta tafi. Zaharaddeen zai amsa da muryarsa anjima. Kadawo ka duba amsa a kasa.</p>
+        </div>
+        """, unsafe_allow_html=True)
         st.audio(fpath)
         st.balloons()
 
     st.markdown("---")
-    st.markdown("#### 🔊 Ji Amsoshin Murya Daga Zaharaddeen")
+    st.markdown("### 🔊 Amsoshin Murya Daga Zaharaddeen")
+    st.caption("Idan Zaharaddeen ya amsa da murya, zaka ji anan:")
     replies = sorted(os.listdir("voice_notes/replies"), reverse=True)[:5]
     if replies:
         for rf in replies:
-            st.caption(f"🔊 Amsa: {rf}")
+            st.success(f"🔊 Amsa daga Zaharaddeen: {rf.replace('.wav','')}")
             st.audio(f"voice_notes/replies/{rf}")
     else:
-        st.caption("Babu amsar murya tukuna - da zarar mun amsa zai bayyana anan.")
+        st.info("⏳ Babu amsar murya tukuna. Da zarar an amsa, zai bayyana anan da murya.")
 
     st.markdown("---")
-    st.subheader("👥 Amsoshin Zaharaddeen Kai Tsaye + Murya")
+    st.subheader("👥 Amsoshin Rubutu (Ga Masu Iya Karatu)")
     rows = get_data()
     answered = [r for r in rows if len(r)>1 and r[1].strip()!=""]
-    if not answered:
-        st.warning("Babu amsa tukuna — Zaharaddeen zai amsa kai tsaye.")
-    else:
+    if answered:
         for i, r in enumerate(reversed(answered)):
             st.markdown(f"**Q:** {r[0]}")
             st.success(f"**A:** {r[1]}")
             if st.button(f"🔊 Sauti", key=f"ans_{i}", use_container_width=True):
                 speak_auto(r[1], f"ans_{i}.mp3")
-            st.caption(f"🕒 {r[2] if len(r)>2 else ''} | ✅ Human-verified")
             st.markdown("---")
 
-    st.markdown("### ✍️ Yi Sabuwar Tambaya (Rubutu)")
-    if "just_sent" not in st.session_state: st.session_state.just_sent = False
-    if "last_q" not in st.session_state: st.session_state.last_q = ""
-    if "clear_flag" not in st.session_state: st.session_state.clear_flag = False
-    if st.session_state.clear_flag:
-        st.session_state.q_box = ""
-        st.session_state.clear_flag = False
-    if st.session_state.just_sent:
-        st.success(f"✅ YA TAFI! '{st.session_state.last_q}'")
-        st.balloons()
+    st.markdown("### ✍️ Yi Tambaya da Rubutu (Optional)")
     q = st.text_area("Tambayarka:", placeholder="Yaya zan duba PVC dina a Bauchi?", key="q_box")
     if st.button("🚀 Aika Tambaya", use_container_width=True, type="primary"):
         if q.strip():
             add_q(q.strip())
-            st.session_state.last_q = q.strip()
-            st.session_state.just_sent = True
-            st.session_state.clear_flag = True
+            st.success("✅ YA TAFI!")
+            st.balloons()
             st.rerun()
-        else:
-            st.warning("⚠️ Rubuta tambaya da farko")
 
 with tab_admin:
-    st.subheader("🔐 Naka Kadai — Amsa Kai Tsaye")
+    st.subheader("🔐 Admin - Zaharaddeen")
     pw = st.text_input("Password:", type="password")
     if pw == "bauchi2027":
-        st.success("Barka da zuwa, Zaharaddeen!")
+        st.success("Barka da zuwa!")
         rows = get_data()
         pending = [(i, r) for i, r in enumerate(rows) if len(r)<2 or r[1].strip()==""]
-        if not pending:
-            st.info("Babu sabbin tambayoyi")
-        else:
-            for idx, r in pending:
-                st.markdown(f"**Tambaya #{idx+1}:** {r[0]}")
-                ans = st.text_area(f"Rubuta Amsa:", key=f"adm_{idx}")
-                if st.button(f"✅ Buga Kai Tsaye", key=f"btn_{idx}", use_container_width=True, type="primary"):
-                    if ans.strip():
-                        add_a(idx, ans.strip())
-                        st.success("🔥 YES! Amsa ta shiga app!")
-                        st.rerun()
-                st.markdown("---")
+        for idx, r in pending:
+            st.markdown(f"**Tambaya #{idx+1}:** {r[0]}")
+            ans = st.text_area("Amsa:", key=f"adm_{idx}")
+            if st.button(f"✅ Buga", key=f"btn_{idx}", use_container_width=True, type="primary"):
+                if ans.strip():
+                    add_a(idx, ans.strip())
+                    st.rerun()
+            st.markdown("---")
 
         st.markdown("---")
-        st.markdown("#### 🎧 Sakonnin Murya - Amsa da Muryarka (Professional)")
+        st.markdown("#### 🎧 Sakonnin Murya - Amsa da Muryarka")
         incoming = sorted(os.listdir("voice_notes/incoming"), reverse=True)
         if not incoming:
-            st.info("Babu sabon sakon murya")
+            st.info("Babu sakon murya")
         else:
             for f in incoming:
                 st.markdown(f"**📩 {f}**")
@@ -195,19 +238,22 @@ with tab_admin:
                 rpath = f"voice_notes/replies/{f}"
                 st.audio(ipath)
                 if os.path.exists(rpath):
-                    st.success("✅ Ka riga ka amsa:")
+                    st.success("Ka riga ka amsa:")
                     st.audio(rpath)
-                st.write("🎤 **Yi reply da muryarka:**")
-                reply_voice = st.audio_input(f"Record reply for {f}", key=f"reply_{f}")
+                
+                st.markdown("**🎤 Amsa da Muryarka (Professional Reply):**")
+                # Professional admin holder too
+                st.markdown('<div style="background:#e8f5e9; padding:10px; border-radius:10px;">', unsafe_allow_html=True)
+                reply_voice = st.audio_input(f"Danna ka yi reply da murya", key=f"reply_{f}")
+                st.markdown('</div>', unsafe_allow_html=True)
                 if reply_voice:
                     with open(rpath, "wb") as out:
                         out.write(reply_voice.getbuffer())
-                    st.success("✅ An tura amsar murya! Zai bayyana ga jama'a.")
+                    st.success("✅ An tura amsar murya!")
                     st.audio(rpath)
                     st.rerun()
                 st.markdown("---")
     elif pw != "":
         st.error("Password kuskure!")
 
-st.markdown("---")
-st.markdown("<div class='footer'><p style='font-weight:bold; color:#006400;'>🎙️ MURYA - Muryar Zabe</p><p>Powered by Zaharaddeen Muhammad | Bauchi</p></div>", unsafe_allow_html=True)
+st.markdown("<div class='footer'><p style='font-weight:bold; color:#006400;'>🎙️ MURYA - Muryar Zabe</p><p>Powered by Zaharaddeen | Bauchi</p></div>", unsafe_allow_html=True)
