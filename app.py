@@ -647,7 +647,7 @@ elif page == "Dashboard":
             st.markdown('<div class="card"><div class="sec">Text vs voice</div>', unsafe_allow_html=True)
             st.bar_chart(df["kind"].value_counts()); st.markdown('</div>', unsafe_allow_html=True)
         topics = {}
-            for _, row in df.iterrows():
+        for _, row in df.iterrows():
                 if row["q"]:
                     m, _s = kb_match(row["q"], KB)
                     # V4 FIX: KB.index(m) crashes for LGA fast-path (new dict not in KB list)
