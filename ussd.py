@@ -7,8 +7,8 @@ app = Flask(__name__)
 REPORTS_FILE = "reports.json"
 
 # USE ENVIRONMENT VARIABLES - SAFE!
-AT_USERNAME = os.environ.get("AT_USERNAME", "sandbox")
-AT_API_KEY = os.environ.get("AT_API_KEY", "sandbox")
+AT_USERNAME = os.environ.get("sandbox")
+AT_API_KEY = os.environ.get("atsk_a65322902d2ecbf0e946719d64c94a15779a46462c9b0c9d1e723acfb9fefb90dca78573")
 
 africastalking.initialize(AT_USERNAME, AT_API_KEY)
 sms = africastalking.SMS
