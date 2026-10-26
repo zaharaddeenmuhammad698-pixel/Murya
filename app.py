@@ -646,12 +646,26 @@ elif page == "Dashboard":
         with r:
             st.markdown('<div class="card"><div class="sec">Text vs voice</div>', unsafe_allow_html=True)
             st.bar_chart(df["kind"].value_counts()); st.markdown('</div>', unsafe_allow_html=True)
-        topics = {}
-        for _, row in df.iterrows():
-            if row["q"]:
-                m, _s = kb_match(row["q"], KB)
-                key = f"FAQ {KB.index(m)+1}" if m else "Other / unmatched"
-                topics[key] = topics.get(key, 0) + 1
+                    topics = {}
+            for _, row in df.iterrows():
+                if row["q"]:
+                    m, _s = kb_match(row["q"], KB)
+                    # V4 FIX: KB.index(m) crashes for LGA fast-path (new dict not in KB list)
+                    if m:
+                        try:
+                            # try find by q match, not by object identity
+                            idx = next((i for i, k in enumerate(KB) if k.get("q") == m.get("q")), None)
+                            if idx is not None:
+                                key = f"FAQ {idx+1}"
+                            else:
+                                # LGA fast path - e.g. Toro -> show LGA name
+                                q_short = (m.get("q") or "")[:35]
+                                key = f"LGA {q_short}" if "ofishin INEC" in q_short else f"FAQ {q_short[:30]}"
+                        except Exception:
+                            key = f"FAQ {str(m.get('id','LGA'))}"
+                    else:
+                        key = "Other / unmatched"
+                    topics[key] = topics.get(key, 0) + 1
         if topics:
             st.markdown('<div class="card"><div class="sec">What citizens ask about</div>', unsafe_allow_html=True)
             st.bar_chart(pd.Series(topics)); st.markdown('</div>', unsafe_allow_html=True)
