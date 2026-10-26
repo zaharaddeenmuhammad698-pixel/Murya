@@ -170,7 +170,28 @@ SEED_KB = [
      "keywords": "zabe asali hoto waya photocopy without original vote picture phone copy"},
 ]
 for _k in SEED_KB: _k.setdefault("source", "INEC (inec.gov.ng)")
-
+BAUCHI_LGAS = {
+    "Bauchi": "Bauchi LGA INEC Office, Yakubun Bauchi Road",
+    "Toro": "Toro LGA INEC Office, Magama Gumau",
+    "Alkaleri": "Alkaleri LGA INEC Office, Alkaleri town",
+    "Misau": "Misau LGA INEC Office, Misau town",
+    "Katagum": "Katagum LGA INEC Office, Azare",
+    "Jama'are": "Jama'are LGA INEC Office, Jama'are",
+    "Darazo": "Darazo LGA INEC Office, Darazo",
+    "Gamawa": "Gamawa LGA INEC Office, Gamawa",
+    "Giade": "Giade LGA INEC Office, Giade",
+    "Shira": "Shira LGA INEC Office, Yana",
+    "Dass": "Dass LGA INEC Office, Dass",
+    "Tafawa Balewa": "Tafawa Balewa LGA INEC Office, Tafawa Balewa",
+    "Bogoro": "Bogoro LGA INEC Office, Bogoro",
+    "Ningi": "Ningi LGA INEC Office, Ningi",
+    "Warji": "Warji LGA INEC Office, Warji",
+    "Ganjuwa": "Ganjuwa LGA INEC Office, Kafin Madaki",
+    "Itas/Gadau": "Itas/Gadau LGA INEC Office, Itas",
+    "Zaki": "Zaki LGA INEC Office, Katagum",
+    "Kirfi": "Kirfi LGA INEC Office, Kirfi",
+    "Dambam": "Dambam LGA INEC Office, Dambam",
+}
 EVAL_QA = [
     ("Yaya zan duba katina na zabe?", 0), ("How can I verify my PVC status?", 0),
     ("Yaushe za a yi zabe a 2027?", 1), ("When is the 2027 election?", 1),
