@@ -192,6 +192,22 @@ BAUCHI_LGAS = {
     "Kirfi": "Kirfi LGA INEC Office, Kirfi",
     "Dambam": "Dambam LGA INEC Office, Dambam",
 }
+# V4 FIX: Ensure LGAs are in DB even if DB already seeded
+try:
+    _c = _conn(); _cur = _c.cursor()
+    _cur.execute("SELECT COUNT(*) FROM kb")
+    _existing_q = set()
+    try:
+        _cur.execute("SELECT q FROM kb")
+        _existing_q = {r[0] for r in _cur.fetchall()}
+    except: pass
+    for _item in SEED_KB[-20:]:  # last 20 are LGAs
+        if _item["q"] not in _existing_q:
+            _cur.execute("INSERT INTO kb (q,a,source) VALUES (?,?,?)",
+                         (_item["q"], _item["a"], _item["source"]))
+    _c.commit(); _c.close()
+except Exception as _e:
+    print("LGA insert fix error:", _e)
 EVAL_QA = [
     ("Yaya zan duba katina na zabe?", 0), ("How can I verify my PVC status?", 0),
     ("Yaushe za a yi zabe a 2027?", 1), ("When is the 2027 election?", 1),
