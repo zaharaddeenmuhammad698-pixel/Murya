@@ -169,6 +169,7 @@ OFFICE_ONLY = {"ofishin", "ofishi", "office"}
 PROVISIONAL = " ⏳ Ana jiran tabbatarwa daga mutum · Awaiting human confirmation."
 LANGS = ["Hausa", "English", "Fulfulde"]
 FF_PENDING = " (Fassarar Fulfulde na jira · Fulfulde translation pending)"
+EN_PENDING = " (Fassarar Turanci na jira · English translation pending)"
 
 def pick_answer(m, lang):
     """Return (text, note). Fulfulde is shown only when a native-speaker-reviewed translation exists;
@@ -177,7 +178,15 @@ def pick_answer(m, lang):
     if lang == "Fulfulde":
         if m.get("a_ff") and m.get("ff_reviewed"): return m["a_ff"], ""
         return body, FF_PENDING
+    if lang == "English":
+        if m.get("a_en") and m.get("en_reviewed"): return m["a_en"], ""
+        return body, EN_PENDING
     return body, ""
+
+def pick_question(k, lang):
+    """Question heading in the chosen language (falls back to the Hausa question)."""
+    if lang == "English" and k.get("q_en") and k.get("en_reviewed"): return k["q_en"]
+    return k["q"]
 
 def lga_qa(name):
     a = LGA_OFFICES[name]
@@ -264,6 +273,25 @@ FF_DRAFTS = {
     SEED_KB[2]["q"]: "Nder ofis INEC hukuma maaɗa nder Bauchi.",
     SEED_KB[3]["q"]: "Aa'a! A foti yahugo cuɓal si a alaa kati cuɓal aadi (PVC). Foto telefon malla fotokopi walaa.",
 }
+# English translation of each approved Hausa fact. Seeded as reviewed; correct it in Admin > Fact base > Save English.
+EN_DRAFTS = {
+    SEED_KB[0]["q"]: ("How do I check my permanent voter card (PVC)?",
+                      "Go to the Independent National Electoral Commission website (inec.gov.ng), or visit its office nearest to you in Bauchi."),
+    SEED_KB[1]["q"]: ("When will the 2027 election hold?",
+                      "The presidential and National Assembly elections will hold on 16 January 2027. The governorship and State House of Assembly elections will hold on 6 February 2027. Murya will tell you if INEC makes any change. Please confirm at inec.gov.ng."),
+    SEED_KB[2]["q"]: ("Where do I collect my permanent voter card in Bauchi?",
+                      "At the INEC office of your local government area in Bauchi."),
+    SEED_KB[3]["q"]: ("Can I vote without my permanent voter card?",
+                      "No! You must have your original permanent voter card (PVC). A photo on your phone or a photocopy does not work."),
+}
+def en_draft_for(q):
+    if q in EN_DRAFTS: return EN_DRAFTS[q]
+    for n in LGA_OFFICES:
+        if lga_qa(n)[0] == q:
+            return (f"Where is the INEC office in {n}?",
+                    f"INEC office, {n}: {LGA_OFFICES[n]}. Please confirm at inec.gov.ng before you go.")
+    return None
+
 def ff_draft_for(q):
     if q in FF_DRAFTS: return FF_DRAFTS[q]
     for n in LGA_OFFICES:
@@ -334,7 +362,7 @@ def init_db():
         c.execute("""CREATE TABLE IF NOT EXISTS kb(id INTEGER PRIMARY KEY AUTOINCREMENT,
             q TEXT, a TEXT, keywords TEXT, source TEXT, reviewed TEXT)""")
         have_kb = {r["name"] for r in c.execute("PRAGMA table_info(kb)")}
-        for col in ("a_ff", "ff_reviewed"):
+        for col in ("a_ff", "ff_reviewed", "a_en", "q_en", "en_reviewed"):
             if col not in have_kb: c.execute(f"ALTER TABLE kb ADD COLUMN {col} TEXT DEFAULT ''")
         if c.execute("SELECT COUNT(*) FROM kb").fetchone()[0] == 0:
             for k in SEED_KB:
@@ -356,6 +384,12 @@ def init_db():
             d = ff_draft_for(row["q"])
             if d and not (row["a_ff"] or "").strip():
                 c.execute("UPDATE kb SET a_ff=? WHERE id=?", (d, row["id"]))
+        # Seed English wherever none exists yet.
+        for row in c.execute("SELECT id,q,a_en FROM kb").fetchall():
+            e = en_draft_for(row["q"])
+            if e and not (row["a_en"] or "").strip():
+                c.execute("UPDATE kb SET q_en=?, a_en=?, en_reviewed=? WHERE id=?",
+                          (e[0], e[1], datetime.now().strftime("%Y-%m-%d"), row["id"]))
         if os.path.exists(OLD_CSV) and c.execute("SELECT COUNT(*) FROM questions").fetchone()[0] == 0:
             try:
                 with open(OLD_CSV, encoding="utf-8") as f:
@@ -437,6 +471,12 @@ def kb_save_ff(kid, text):
     t = text.strip()[:1000]
     with _conn() as c:
         c.execute("UPDATE kb SET a_ff=?, ff_reviewed=? WHERE id=?", (t, datetime.now().strftime("%Y-%m-%d") if t else "", kid))
+def kb_save_en(kid, q_en, a_en):
+    """Saving an English version in Admin counts as a review (sets en_reviewed)."""
+    q_en, a_en = q_en.strip()[:300], a_en.strip()[:1000]
+    with _conn() as c:
+        c.execute("UPDATE kb SET q_en=?, a_en=?, en_reviewed=? WHERE id=?",
+                  (q_en, a_en, datetime.now().strftime("%Y-%m-%d") if a_en else "", kid))
 def kb_import_ff(kid, text):
     """Imported translations stay UNCONFIRMED until a reviewer presses Save Fulfulde."""
     with _conn() as c: c.execute("UPDATE kb SET a_ff=?, ff_reviewed='' WHERE id=?", (text.strip()[:1000], kid))
@@ -554,6 +594,7 @@ def speak_lga(name, text, lang="Hausa"):
     """Play a human-recorded clip (voice_audio/<lga>.*, or <lga>_ff.* for Fulfulde) if present, else fall back.
     There is no synthetic Fulfulde voice, so Fulfulde never uses TTS."""
     slug = clip_slug(name)
+    if lang == "English": speak_auto(text); return
     if lang == "Fulfulde":
         pf = find_clip(slug, True)
         if pf: st.audio(pf); return
@@ -565,6 +606,7 @@ def speak_lga(name, text, lang="Hausa"):
 def speak_kb(k, text, lang="Hausa"):
     """FAQ answer: play the recorded clip for this fact (voice_audio/faq_<id>.*) if present, else TTS."""
     slug = f"faq_{k['id']}"
+    if lang == "English": speak_auto(text); return
     if lang == "Fulfulde":
         pf = find_clip(slug, True)
         if pf: st.audio(pf); return
@@ -763,7 +805,8 @@ elif page == "Ask":
                                     unsafe_allow_html=True)
                             if st.button("🔊 Saurari", key=f"spf_{it['id']}"):
                                 lga = lga_hit(it["q"])
-                                if lga: speak_lga(lga, m["a"], it.get("lang") or "Hausa")
+                                if (it.get("lang") or "Hausa") == "English": speak_auto(body)
+                                elif lga: speak_lga(lga, m["a"], it.get("lang") or "Hausa")
                                 elif m.get("id"): speak_kb(m, m["a"], it.get("lang") or "Hausa")
                                 else: speak_auto(m["a"])
         st.write("")
@@ -788,16 +831,18 @@ elif page == "Verified Info":
         txt = body + ffnote + ("" if confirmed else PROVISIONAL)
         cls = "bf" if confirmed else "bf prov"
         st.markdown(f'<div class="{cls}">{esc(txt)}</div>', unsafe_allow_html=True)
-        speak_lga(pick, txt, info_lang)
+        speak_lga(pick, txt if info_lang == "English" else (k["a"] if k else lga_qa(pick)[1]), info_lang)
 
     st.markdown("#### Tambayoyi da amsoshi · FAQs")
     VERIFIED = [k for k in KB if k.get("reviewed")]
     for i, k in enumerate(VERIFIED):
-        st.markdown(f'<div class="card"><h3>Q{i+1}: {esc(k["q"])}</h3><p style="color:#0b5d2e;font-weight:600;">{esc(pick_answer(k, info_lang)[0])}{esc(pick_answer(k, info_lang)[1])}</p>'
+        st.markdown(f'<div class="card"><h3>Q{i+1}: {esc(pick_question(k, info_lang))}</h3><p style="color:#0b5d2e;font-weight:600;">{esc(pick_answer(k, info_lang)[0])}{esc(pick_answer(k, info_lang)[1])}</p>'
                     f'<span class="chip info">Source: {esc(k.get("source",""))}</span><span class="chip ok">Reviewed {esc(k.get("reviewed",""))}</span></div>', unsafe_allow_html=True)
         cc = st.columns([1, 1, 4])
         with cc[0]:
-            if st.button("🔊 Sauti", key=f"faq_{k['id']}"): speak_kb(k, k["a"], info_lang)
+            if st.button("🔊 Sauti", key=f"faq_{k['id']}"):
+                if info_lang == "English": speak_auto(pick_answer(k, "English")[0])
+                else: speak_kb(k, k["a"], info_lang)
         with cc[1]: st.link_button("🔗 Share", wa_link(f"Q: {k['q']} | A: {k['a']}"))
 
 # =====================================================================
@@ -1015,7 +1060,11 @@ elif page == "Admin":
                     src = st.text_input("Source", k["source"], key=f"ks_{k['id']}")
                     aff = st.text_area("Amsa cikin Fulfulde · Fulfulde answer (a native speaker must check it; 🌍 = confirmed)",
                                        k.get("a_ff") or "", key=f"kff_{k['id']}")
-                    c = st.columns(4)
+                    qen = st.text_input("English question (shown when a visitor picks English)", k.get("q_en") or "", key=f"kenq_{k['id']}")
+                    aen = st.text_area("English answer (check it matches the Hausa one)", k.get("a_en") or "", key=f"ken_{k['id']}")
+                    c = st.columns(5)
+                    with c[4]:
+                        if st.button("🇬🇧 Save English", key=f"kensave_{k['id']}"): kb_save_en(k["id"], qen, aen); st.rerun()
                     with c[0]:
                         if st.button("💾 Save", key=f"ksave_{k['id']}"): kb_save(k["id"], q, a, kw, src); st.rerun()
                     with c[1]:
