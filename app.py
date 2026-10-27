@@ -59,6 +59,7 @@ div[data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) p{colo
 .bu{background:#d9fdd3;padding:9px 12px;border-radius:14px 14px 2px 14px;margin:8px 0 4px 12%;font-size:13px;box-shadow:0 1px 1px rgba(0,0,0,.08);}
 .ba{background:#fff;border:1px solid var(--line);padding:9px 12px;border-radius:14px 14px 14px 2px;margin:4px 12% 8px 0;font-size:13px;box-shadow:0 1px 1px rgba(0,0,0,.05);}
 .bf{background:var(--g50);border:1px dashed #9ccdb0;padding:9px 12px;border-radius:12px;margin:4px 12% 8px 0;font-size:12.5px;}
+.bf.prov{background:#fffbeb;border:1px dashed #f0c36d;}
 .bm{font-size:10px;color:#667781;text-align:right;margin-top:3px;}
 .who{font-weight:700;font-size:11px;color:var(--g800);margin-bottom:2px;}
 .chip{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:999px;margin-right:5px;}
@@ -124,21 +125,85 @@ STOP = {"the","and","for","you","can","how","what","when","where","does","did","
 def toks(text: str) -> set:
     return {w for w in re.findall(r"[a-z0-9]+", norm(text)) if len(w) > 2 and w not in STOP}
 
+# ---------------------------------------------------------------------
+# INEC LGA OFFICES (Bauchi State)
+# Source: INEC Bauchi State LGA office directory (inecnigeria.org, PDF dated 2024).
+# Every office answer is PROVISIONAL until a person confirms it in Admin > Fact base.
+# An empty "reviewed" date in the kb table means "not yet confirmed".
+# Darazo and Kirfi: the PDF road names are garbled, so only landmarks are kept.
+# ---------------------------------------------------------------------
+LGA_SRC = "INEC Bauchi LGA office directory"
+LGA_OFFICES = {
+    "Alkaleri": "Along Bauchi Road, Alkaleri",
+    "Bauchi (Kofar Ran)": "Opposite Urban Maternity, Adamu Ajiya Road, Bauchi",
+    "Bogoro": "Adjacent LGA Secretariat, Bogoro",
+    "Dambam": "Off Kano-Maiduguri Road, Dambam",
+    "Darazo": "Near V.I.O. Office, Darazo",
+    "Dass": "Along Dunkurma Street, opposite Library, Dass",
+    "Gamawa": "Opposite Gamawa LGA Secretariat, Gamawa",
+    "Ganjuwa": "Along Kano Road, Kafin Madaki",
+    "Giade": "Along Kano Road, Giade",
+    "Itas/Gadau": "Along Atafowa Road, Itas",
+    "Jama'are": "Near Water Board, Jama'are",
+    "Katagum": "Along Azare-Bulkachuwa Road, Azare",
+    "Kirfi": "Adjacent Kirfi Police Station, Kirfi",
+    "Misau": "Along Kari Road, Misau",
+    "Ningi": "Opposite Ningi Police Station, along Kano Road, Ningi",
+    "Shira": "Along Giade-Misau Road, Shira",
+    "Tafawa Balewa": "Beside DSS Office, Bununu",
+    "Toro": "LGA Secretariat Road, near First Bank, Toro",
+    "Warji": "Unguwar Gandu (Makera), opposite Warji Micro-Finance Bank, Warji",
+    "Zaki": "Old Secretariat, Katagum, adjacent Zaki LGA Secretariat",
+}
+LGA_PATTERNS = {
+    "Alkaleri": r"alkaleri", "Bauchi (Kofar Ran)": r"kofar ran|bauchi lga|hukumar bauchi",
+    "Bogoro": r"bogoro", "Dambam": r"damba[mn]", "Darazo": r"darazo", "Dass": r"\bdass\b",
+    "Gamawa": r"gamawa", "Ganjuwa": r"ganjuwa|kafin madaki", "Giade": r"giade",
+    "Itas/Gadau": r"\bitas\b|gadau", "Jama'are": r"jama'?are", "Katagum": r"katagum|azare",
+    "Kirfi": r"kirfi", "Misau": r"misau", "Ningi": r"ningi", "Shira": r"\bshira\b",
+    "Tafawa Balewa": r"tafawa|balewa|bununu", "Toro": r"\btoro\b", "Warji": r"warji",
+    "Zaki": r"\bzaki\b",
+}
+OFFICE_WORDS = {"ofishin", "ofishi", "office", "karbi", "collect", "dauka", "pick"}
+OFFICE_ONLY = {"ofishin", "ofishi", "office"}
+PROVISIONAL = " ⏳ Ana jiran tabbatarwa daga mutum · Awaiting human confirmation."
+
+def lga_qa(name):
+    a = LGA_OFFICES[name]
+    return (f"Ina ofishin INEC na {name}?",
+            f"Ofishin INEC na {name}: {a}. · INEC office, {name}: {a}. "
+            f"Ka tabbatar a inec.gov.ng kafin ka tafi.")
+
+def lga_hit(question):
+    """Return the LGA name a question is asking an office location for, else None."""
+    t = toks(question)
+    if not (t & OFFICE_WORDS): return None
+    q = norm(question)
+    for name, pat in LGA_PATTERNS.items():
+        if re.search(pat, q): return name
+    # bare "ofishin INEC a Bauchi" -> Bauchi LGA office (Kofar Ran); "karbi PVC a Bauchi" is NOT matched
+    if (t & OFFICE_ONLY) and re.search(r"\bbauchi\b", q):
+        return "Bauchi (Kofar Ran)"
+    return None
+
 MATCH_THRESHOLD = 0.20
 
 def kb_match(question: str, kb: list):
     """Retrieve the closest human-verified FAQ. Pure retrieval: nothing is generated."""
     qt = toks(question)
-    if not qt or not kb: return None, 0.0
-    # V4 FAST PATH: If question contains an LGA name, return it directly — guarantees answer
-    q_low = norm(question)
-    for _lga, _addr in BAUCHI_LGAS.items():
-        if _lga.lower() in q_low:
-            for _k in kb:
-                if _lga.lower() in (_k.get('q','')+_k.get('keywords','')+_k.get('a','')).lower():
-                    return _k, 1.0
-            # fallback even if not in kb list yet — build answer from dict
-            return {"q": f"Ina ofishin INEC a {_lga}?", "a": f"Ofishin INEC na {_lga}: {_addr}. Tabbatar: inec.gov.ng", "source": "inec.gov.ng", "keywords": _lga}, 1.0
+    if not qt: return None, 0.0
+    # Office-location questions: always answer, but flag as awaiting confirmation until a person confirms.
+    name = lga_hit(question)
+    if name:
+        q_text, a_text = lga_qa(name)
+        k = next((k for k in kb if k.get("q") == q_text),
+                 {"q": q_text, "a": a_text, "source": LGA_SRC, "keywords": "", "reviewed": ""})
+        if not k.get("reviewed"):
+            return dict(k, a=k["a"] + PROVISIONAL), 0.5
+        return k, 0.9
+    # Keep the 20 office entries out of ordinary keyword matching.
+    kb = [k for k in kb if k.get("source") != LGA_SRC]
+    if not kb: return None, 0.0
     docs = [toks(f"{k['q']} {k.get('keywords','')}") for k in kb]
     n = len(docs)
     df = {}
@@ -173,50 +238,13 @@ SEED_KB = [
      "keywords": "yaushe zabe 2027 janairu lokaci kwanan wata date when election day gudana"},
     {"q": "Ina zan karbi katin zabe na dindindin a Bauchi?",
      "a": "A ofishin Hukumar Zabe Mai Zaman Kanta na karamar hukumar ka a Bauchi.",
-     "keywords": "karbi dauka karbar pvc kati ofishin lga karamar hukuma collect pick office bauchi wane ofishi"},
+     "keywords": "karbi dauka karbar pvc kati ofishin lga karamar hukuma collect pick office bauchi wane ofishi where voter card"},
     {"q": "Zan iya zabe ba tare da katin zabe na dindindin ba?",
      "a": "A'a! Dole sai da katin zabe na asali. Hoton waya ko photocopy ba ya aiki.",
-     "keywords": "zabe asali hoto waya photocopy without original vote picture phone copy"},
+     "keywords": "zabe asali hoto hoton katina waya photocopy without original vote picture phone copy"},
 ]
 for _k in SEED_KB: _k.setdefault("source", "INEC (inec.gov.ng)")
-BAUCHI_LGAS = {
-    "Bauchi": "Bauchi LGA INEC Office, Yakubun Bauchi Road",
-    "Toro": "Toro LGA INEC Office, Magama Gumau",
-    "Alkaleri": "Alkaleri LGA INEC Office, Alkaleri town",
-    "Misau": "Misau LGA INEC Office, Misau town",
-    "Katagum": "Katagum LGA INEC Office, Azare",
-    "Jama'are": "Jama'are LGA INEC Office, Jama'are",
-    "Darazo": "Darazo LGA INEC Office, Darazo",
-    "Gamawa": "Gamawa LGA INEC Office, Gamawa",
-    "Giade": "Giade LGA INEC Office, Giade",
-    "Shira": "Shira LGA INEC Office, Yana",
-    "Dass": "Dass LGA INEC Office, Dass",
-    "Tafawa Balewa": "Tafawa Balewa LGA INEC Office, Tafawa Balewa",
-    "Bogoro": "Bogoro LGA INEC Office, Bogoro",
-    "Ningi": "Ningi LGA INEC Office, Ningi",
-    "Warji": "Warji LGA INEC Office, Warji",
-    "Ganjuwa": "Ganjuwa LGA INEC Office, Kafin Madaki",
-    "Itas/Gadau": "Itas/Gadau LGA INEC Office, Itas",
-    "Zaki": "Zaki LGA INEC Office, Katagum",
-    "Kirfi": "Kirfi LGA INEC Office, Kirfi",
-    "Dambam": "Dambam LGA INEC Office, Dambam",
-}
-# V4 FIX: Ensure LGAs are in DB even if DB already seeded
-try:
-    _c = _conn(); _cur = _c.cursor()
-    _cur.execute("SELECT COUNT(*) FROM kb")
-    _existing_q = set()
-    try:
-        _cur.execute("SELECT q FROM kb")
-        _existing_q = {r[0] for r in _cur.fetchall()}
-    except: pass
-    for _item in SEED_KB[-20:]:  # last 20 are LGAs
-        if _item["q"] not in _existing_q:
-            _cur.execute("INSERT INTO kb (q,a,source) VALUES (?,?,?)",
-                         (_item["q"], _item["a"], _item["source"]))
-    _c.commit(); _c.close()
-except Exception as _e:
-    print("LGA insert fix error:", _e)
+
 EVAL_QA = [
     ("Yaya zan duba katina na zabe?", 0), ("How can I verify my PVC status?", 0),
     ("Yaushe za a yi zabe a 2027?", 1), ("When is the 2027 election?", 1),
@@ -240,7 +268,8 @@ def run_eval(kb):
         ok = (got == exp) if exp is not None else (m is None)
         hit += ok
         rows.append({"Question": q, "Expected": "no match" if exp is None else f"FAQ {exp+1}",
-                     "Got": "no match" if m is None else f"FAQ {got+1}", "Score": round(s, 2), "Pass": "✅" if ok else "❌"})
+                     "Got": "no match" if m is None else (f"FAQ {got+1}" if got is not None else "office entry"),
+                     "Score": round(s, 2), "Pass": "✅" if ok else "❌"})
     frows, fhit = [], 0
     for t, exp in EVAL_FLAGS:
         fl = risk_flags(t)
@@ -256,6 +285,7 @@ DB = "murya.db"
 OLD_CSV = "murya_strong.csv"
 os.makedirs("voice_notes/incoming", exist_ok=True)
 os.makedirs("voice_notes/replies", exist_ok=True)
+os.makedirs("voice_audio", exist_ok=True)   # recorded Hausa answers, e.g. voice_audio/toro.mp3
 RATE_LIMIT_PER_HOUR = 15
 NOW = lambda: datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -281,6 +311,13 @@ def init_db():
             for k in SEED_KB:
                 c.execute("INSERT INTO kb(q,a,keywords,source,reviewed) VALUES(?,?,?,?,?)",
                           (k["q"], k["a"], k["keywords"], k["source"], datetime.now().strftime("%Y-%m-%d")))
+        # Seed the 20 INEC office answers once. reviewed="" means "awaiting human confirmation".
+        have_q = {r["q"] for r in c.execute("SELECT q FROM kb")}
+        for name in LGA_OFFICES:
+            q_, a_ = lga_qa(name)
+            if q_ not in have_q:
+                c.execute("INSERT INTO kb(q,a,keywords,source,reviewed) VALUES(?,?,?,?,?)",
+                          (q_, a_, name, LGA_SRC, ""))
         if os.path.exists(OLD_CSV) and c.execute("SELECT COUNT(*) FROM questions").fetchone()[0] == 0:
             try:
                 with open(OLD_CSV, encoding="utf-8") as f:
@@ -343,6 +380,7 @@ def delete_sid(sid):
     for i in ids: delete_q(i)
     return len(ids)
 def kb_save(kid, q, a, kw, src):
+    """Saving a fact in Admin counts as a person confirming it (sets the reviewed date)."""
     with _conn() as c:
         if kid: c.execute("UPDATE kb SET q=?,a=?,keywords=?,source=?,reviewed=? WHERE id=?",
                           (q, a, kw, src, datetime.now().strftime("%Y-%m-%d"), kid))
@@ -385,7 +423,8 @@ AI_SYSTEM = (
 def ai_draft(question, kb):
     key = secret("ANTHROPIC_API_KEY")
     if not key or not question.strip(): return None
-    facts = "\n".join(f"- Q: {k['q']} A: {k['a']} (source: {k.get('source','')})" for k in kb)
+    # Only facts a person has confirmed may ground an AI draft.
+    facts = "\n".join(f"- Q: {k['q']} A: {k['a']} (source: {k.get('source','')})" for k in kb if k.get("reviewed"))
     body = {"model": secret("ANTHROPIC_MODEL", "claude-haiku-5-5"), "max_tokens": 500, "system": AI_SYSTEM,
             "messages": [{"role": "user", "content": f"VERIFIED FACTS:\n{facts}\n\n<question>{question}</question>"}]}
     try:
@@ -428,12 +467,21 @@ def tts_bytes(text, lang):
     return buf.getvalue()
 
 def speak_auto(text):
+    # NOTE: gTTS has no Hausa voice (as far as we know), so "ha" fails and falls back to English.
+    # For real Hausa audio, record clips into voice_audio/ (see speak_lga).
     for lang in dict.fromkeys([detect_by_text(text), "en"]):
         try:
             st.audio(tts_bytes(text, lang), format="audio/mp3"); return
         except Exception:
             continue
     st.caption("🔊 Sauti na bukatar internet kadan")
+
+def speak_lga(name, text):
+    """Play a human-recorded Hausa clip (voice_audio/<lga>.mp3) if present, else fall back to TTS."""
+    slug = re.sub(r"[^a-z0-9]+", "_", norm(name)).strip("_")
+    p = f"voice_audio/{slug}.mp3"
+    if os.path.exists(p): st.audio(p)
+    else: speak_auto(text)
 
 def wa_link(text): return "https://wa.me/?text=" + quote("MURYA Bauchi - " + text[:400])
 
@@ -479,7 +527,8 @@ if page == "Home":
       <span class="badge">Track 3 · Inclusive & Multilingual Electoral/Civic Technology</span>
       <h1>Ask in Hausa. Get a verified answer. Listen to it.</h1>
       <p>MURYA is a voice-first election-information helpdesk for Bauchi. Citizens speak or type a question, AI helps
-      understand it, and a real person checks every answer against official INEC sources before it is published.</p>
+      understand it, and a real person checks every answer against official INEC sources before it is published.
+      No one is left behind: you do not need to read, write or understand English to use MURYA.</p>
     </div>""", unsafe_allow_html=True)
     b1, b2, b3 = st.columns([1, 1, 3])
     with b1: st.button("🎤 Ask a question", type="primary", use_container_width=True, on_click=go, args=("Ask",))
@@ -599,9 +648,24 @@ elif page == "Ask":
                     if it["q"]:
                         m, sc = kb_match(it["q"], KB)
                         if m:
-                            st.markdown(f'<div class="bf"><b>📌 Tabbataccen bayani mai alaƙa · Related verified FAQ</b><br>{esc(m["a"])}<br>'
-                                        f'<span style="font-size:10.5px;color:#557;">Source: {esc(m.get("source",""))} · reviewed {esc(m.get("reviewed",""))}</span></div>', unsafe_allow_html=True)
-                            if st.button("🔊 Saurari", key=f"spf_{it['id']}"): speak_auto(m["a"])
+                            prov = PROVISIONAL in m["a"]
+                            body = m["a"].replace(PROVISIONAL, "")
+                            if prov:
+                                st.markdown(
+                                    '<div class="bf prov"><b>⏳ Bayani na farko · Preliminary info</b><br>'
+                                    f'{esc(body)}<br>'
+                                    '<span class="chip wait">Ana jiran tabbatarwa daga mutum · Awaiting human confirmation</span><br>'
+                                    f'<span style="font-size:10.5px;color:#557;">Source: {esc(m.get("source",""))}</span></div>',
+                                    unsafe_allow_html=True)
+                            else:
+                                st.markdown(
+                                    f'<div class="bf"><b>📌 Tabbataccen bayani mai alaƙa · Related verified FAQ</b><br>{esc(body)}<br>'
+                                    f'<span style="font-size:10.5px;color:#557;">Source: {esc(m.get("source",""))} · reviewed {esc(m.get("reviewed",""))}</span></div>',
+                                    unsafe_allow_html=True)
+                            if st.button("🔊 Saurari", key=f"spf_{it['id']}"):
+                                lga = lga_hit(it["q"])
+                                if lga: speak_lga(lga, m["a"])
+                                else: speak_auto(m["a"])
         st.write("")
         if st.button("🧹 Goge sakonni na duka · Delete all my messages"):
             k = delete_sid(SID); st.session_state.notice = ("ok", f"An goge sakonni {k}. · {k} message(s) deleted."); st.rerun()
@@ -611,8 +675,22 @@ elif page == "Ask":
 # =====================================================================
 elif page == "Verified Info":
     st.markdown("### ✅ Bayanan INEC tabbatattu · Verified INEC information")
-    st.markdown('<div class="tip">Every item below was written or approved by a person and checked against official INEC sources. Nothing here is AI-generated.</div>', unsafe_allow_html=True)
-    for i, k in enumerate(KB):
+    st.markdown('<div class="tip">Every item in the list below was written or approved by a person and checked against official INEC sources. Nothing here is AI-generated.</div>', unsafe_allow_html=True)
+
+    # Tap-to-pick: for people who cannot type or read well.
+    st.markdown("#### 📍 Ina ofishin INEC na karamar hukumar ka?")
+    pick = st.selectbox("Zaɓi karamar hukuma · Choose your LGA", ["—"] + list(LGA_OFFICES), key="lga_pick")
+    if pick != "—":
+        k = next((k for k in KB if k["q"] == lga_qa(pick)[0]), None)
+        confirmed = bool(k and k.get("reviewed"))
+        txt = (k["a"] if k else lga_qa(pick)[1]) + ("" if confirmed else PROVISIONAL)
+        cls = "bf" if confirmed else "bf prov"
+        st.markdown(f'<div class="{cls}">{esc(txt)}</div>', unsafe_allow_html=True)
+        speak_lga(pick, txt)
+
+    st.markdown("#### Tambayoyi da amsoshi · FAQs")
+    VERIFIED = [k for k in KB if k.get("reviewed")]
+    for i, k in enumerate(VERIFIED):
         st.markdown(f'<div class="card"><h3>Q{i+1}: {esc(k["q"])}</h3><p style="color:#0b5d2e;font-weight:600;">{esc(k["a"])}</p>'
                     f'<span class="chip info">Source: {esc(k.get("source",""))}</span><span class="chip ok">Reviewed {esc(k.get("reviewed",""))}</span></div>', unsafe_allow_html=True)
         cc = st.columns([1, 1, 4])
@@ -648,24 +726,16 @@ elif page == "Dashboard":
             st.bar_chart(df["kind"].value_counts()); st.markdown('</div>', unsafe_allow_html=True)
         topics = {}
         for _, row in df.iterrows():
-                if row["q"]:
-                    m, _s = kb_match(row["q"], KB)
-                    # V4 FIX: KB.index(m) crashes for LGA fast-path (new dict not in KB list)
-                    if m:
-                        try:
-                            # try find by q match, not by object identity
-                            idx = next((i for i, k in enumerate(KB) if k.get("q") == m.get("q")), None)
-                            if idx is not None:
-                                key = f"FAQ {idx+1}"
-                            else:
-                                # LGA fast path - e.g. Toro -> show LGA name
-                                q_short = (m.get("q") or "")[:35]
-                                key = f"LGA {q_short}" if "ofishin INEC" in q_short else f"FAQ {q_short[:30]}"
-                        except Exception:
-                            key = f"FAQ {str(m.get('id','LGA'))}"
-                    else:
-                        key = "Other / unmatched"
-                    topics[key] = topics.get(key, 0) + 1
+            if not row["q"]: continue
+            m, _s = kb_match(row["q"], KB)
+            if not m:
+                key = "Other / unmatched"
+            elif m.get("source") == LGA_SRC:
+                key = "Office locations"
+            else:
+                idx = next((i for i, k in enumerate(KB) if k.get("q") == m.get("q")), None)
+                key = f"FAQ {idx+1}" if idx is not None else "Other / unmatched"
+            topics[key] = topics.get(key, 0) + 1
         if topics:
             st.markdown('<div class="card"><div class="sec">What citizens ask about</div>', unsafe_allow_html=True)
             st.bar_chart(pd.Series(topics)); st.markdown('</div>', unsafe_allow_html=True)
@@ -685,13 +755,17 @@ elif page == "Responsible AI":
         st.markdown("""<div class="card"><h3>Where AI is used</h3><ul>
         <li><b>Speech-to-text</b> turns Hausa/English voice notes into text (when enabled).</li>
         <li><b>Retrieval</b> matches a question to human-verified FAQs. Nothing is generated.</li>
-        <li><b>Draft assistant</b> proposes a reply using <i>only</i> the verified fact base. It must say "not grounded" when facts do not cover the question.</li>
+        <li><b>Draft assistant</b> proposes a reply using <i>only</i> the confirmed fact base. It must say "not grounded" when facts do not cover the question.</li>
         <li><b>Risk flags</b> highlight links, vote-buying offers, rumours, phone numbers and partisan content for reviewers.</li></ul></div>""", unsafe_allow_html=True)
         st.markdown("""<div class="card"><h3>What AI never does</h3><ul>
         <li>Publish an answer on its own. A person approves every answer.</li>
         <li>Express views on parties, candidates or results.</li>
         <li>Use real voter registers or confidential INEC systems.</li>
         <li>Target or persuade voters.</li></ul></div>""", unsafe_allow_html=True)
+        st.markdown("""<div class="card"><h3>Inclusion by design</h3><ul>
+        <li>Hausa first, English alongside. Voice in, voice out.</li>
+        <li>Tap-to-pick LGA list for people who cannot type or read well.</li>
+        <li>Office locations from INEC's directory are always shown as <b>"awaiting human confirmation"</b> until a person confirms them.</li></ul></div>""", unsafe_allow_html=True)
     with b:
         st.markdown("""<div class="card"><h3>Privacy by design</h3><ul>
         <li>Explicit consent before any message is stored.</li>
@@ -702,10 +776,10 @@ elif page == "Responsible AI":
         <li>Admin access uses a salted, hashed password with login lockout.</li></ul></div>""", unsafe_allow_html=True)
         st.markdown("""<div class="card"><h3>Honest limitations</h3><ul>
         <li>Hausa speech recognition is less accurate than English; a reviewer can always play the original audio.</li>
-        <li>The verified fact base is small (a handful of FAQs) and manually maintained.</li>
+        <li>Synthetic text-to-speech has no native Hausa voice, so Hausa answers use human-recorded clips where available.</li>
+        <li>The verified fact base is small and manually maintained.</li>
         <li>One reviewer is a bottleneck. Scaling needs trained volunteers and shift rosters.</li>
         <li>Free hosting may erase stored data on restart; a managed database is needed for production.</li>
-        <li>Text-to-speech needs an internet connection.</li>
         <li>No offline mode yet. Languages beyond Hausa and English are future work.</li></ul></div>""", unsafe_allow_html=True)
     rows, hit, frows, fhit = run_eval(KB)
     st.markdown(f'<div class="card"><h3>Live self-test (runs on the current verified FAQs)</h3>'
@@ -756,8 +830,12 @@ elif page == "Admin":
                     if r["q"]:
                         m, sc = kb_match(r["q"], KB)
                         if m:
-                            st.info(f"Matching verified FAQ ({sc:.0%}): {m['q']}")
-                            st.button("Use this verified answer", key=f"usekb_{r['id']}", on_click=use_text, args=(r["id"], m["a"]))
+                            if PROVISIONAL in m["a"]:
+                                st.warning(f"Office answer NOT yet confirmed ({sc:.0%}): {m['q']} — confirm it in Fact base, then publish.")
+                            else:
+                                st.info(f"Matching verified FAQ ({sc:.0%}): {m['q']}")
+                            st.button("Use this answer", key=f"usekb_{r['id']}", on_click=use_text,
+                                      args=(r["id"], m["a"].replace(PROVISIONAL, "")))
                     if r["ai_draft"] or r["ai_risk"]:
                         st.caption(f"AI draft · grounded: {'yes' if r['ai_grounded'] else 'NO'} · risk: {r['ai_risk'] or 'n/a'}")
                     if st.session_state.get(f"aierr_{r['id']}"): st.error("AI draft unavailable (no key or network error).")
@@ -792,17 +870,27 @@ elif page == "Admin":
                         if st.button("🗑️ Delete", key=f"delp_{r['id']}"): delete_q(r["id"]); st.rerun()
 
         with t3:
-            st.caption("Only facts you have verified against official INEC sources belong here. Retrieval and AI drafts use this list and nothing else.")
+            st.caption("Only facts you have verified against official INEC sources belong here. "
+                       "⏳ = awaiting confirmation (citizens see the 'awaiting human confirmation' note). "
+                       "Press Confirm (or Save) once you have checked the fact against INEC. "
+                       "Only confirmed facts ground AI drafts and appear on Verified Info.")
+            n_wait = sum(1 for k in KB if not k.get("reviewed"))
+            if n_wait: st.warning(f"{n_wait} fact(s) awaiting confirmation.")
             for k in KB:
-                with st.expander(f"{k['id']}. {k['q']}"):
+                mark = "✅" if k.get("reviewed") else "⏳"
+                with st.expander(f"{mark} {k['id']}. {k['q']}"):
                     q = st.text_input("Question", k["q"], key=f"kq_{k['id']}")
                     a = st.text_area("Verified answer", k["a"], key=f"ka_{k['id']}")
                     kw = st.text_input("Keywords (Hausa + English, space-separated)", k["keywords"], key=f"kk_{k['id']}")
                     src = st.text_input("Source", k["source"], key=f"ks_{k['id']}")
-                    c = st.columns(2)
+                    c = st.columns(3)
                     with c[0]:
                         if st.button("💾 Save", key=f"ksave_{k['id']}"): kb_save(k["id"], q, a, kw, src); st.rerun()
                     with c[1]:
+                        if not k.get("reviewed"):
+                            if st.button("✅ Confirm", key=f"kconf_{k['id']}"):
+                                kb_save(k["id"], k["q"], k["a"], k["keywords"], k["source"]); st.rerun()
+                    with c[2]:
                         if st.button("🗑️ Delete", key=f"kdel_{k['id']}"): kb_delete(k["id"]); st.rerun()
             with st.form("kb_add", clear_on_submit=True):
                 st.markdown("**➕ Add verified fact**")
