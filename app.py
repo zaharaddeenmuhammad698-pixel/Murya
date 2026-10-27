@@ -256,6 +256,21 @@ SEED_KB = [
 ]
 for _k in SEED_KB: _k.setdefault("source", "INEC (inec.gov.ng)")
 
+# DRAFT Fulfulde written by the assistant, NOT by a native speaker. It is stored unconfirmed: citizens keep seeing
+# Hausa until a Fulfulde speaker corrects it in Admin > Fact base and presses "Save Fulfulde".
+FF_DRAFTS = {
+    SEED_KB[0]["q"]: "Yahu e inec.gov.ng malla yahu e ofis INEC ɓurɗo ɗowtaade e maaɗa nder Bauchi.",
+    SEED_KB[1]["q"]: "Cuɓal Presidnt e Majalisa Ngenndi: 16 Janairu 2027. Cuɓal gomnaaji e Majalisaaji Leydi: 6 Fabrairu 2027. Murya hollan ma si INEC wayli. Tabbatinu e inec.gov.ng.",
+    SEED_KB[2]["q"]: "Nder ofis INEC hukuma maaɗa nder Bauchi.",
+    SEED_KB[3]["q"]: "Aa'a! A foti yahugo cuɓal si a alaa kati cuɓal aadi (PVC). Foto telefon malla fotokopi walaa.",
+}
+def ff_draft_for(q):
+    if q in FF_DRAFTS: return FF_DRAFTS[q]
+    for n in LGA_OFFICES:
+        if lga_qa(n)[0] == q:
+            return f"Ofis INEC {n}: {LGA_OFFICES[n]}. Tabbatinu e inec.gov.ng adii a yaha."
+    return ""
+
 EVAL_QA = [
     ("Yaya zan duba katina na zabe?", 0), ("How can I verify my PVC status?", 0),
     ("Yaushe za a yi zabe a 2027?", 1), ("When is the 2027 election?", 1),
@@ -336,6 +351,11 @@ def init_db():
         c.execute("UPDATE kb SET a=?, keywords=? WHERE q=? AND a=?",
                   (SEED_KB[1]["a"], SEED_KB[1]["keywords"], SEED_KB[1]["q"],
                    "Zaben gama gari zai gudana ne a watan Janairun 2027. Murya za ta sanar da kai da zarar Hukumar Zabe Mai Zaman Kanta ta yi wani sauyi."))
+        # Seed the draft Fulfulde (unconfirmed) wherever no Fulfulde exists yet.
+        for row in c.execute("SELECT id,q,a_ff FROM kb").fetchall():
+            d = ff_draft_for(row["q"])
+            if d and not (row["a_ff"] or "").strip():
+                c.execute("UPDATE kb SET a_ff=? WHERE id=?", (d, row["id"]))
         if os.path.exists(OLD_CSV) and c.execute("SELECT COUNT(*) FROM questions").fetchone()[0] == 0:
             try:
                 with open(OLD_CSV, encoding="utf-8") as f:
@@ -379,6 +399,10 @@ def add_voice(fname, sid, transcript, lang, stt_status):
     with _conn() as c:
         c.execute("INSERT INTO questions(q,created,sid,kind,audio,lang,stt,flags) VALUES(?,?,?,'voice',?,?,?,?)",
                   (transcript[:500], NOW(), sid, fname, lang, stt_status, ",".join(risk_flags(transcript))))
+VOICE_REPLY_TEXT = "🎙️ Amsar murya · Voice reply"
+def reply_path(row):
+    """Where an admin's voice reply is stored (voice questions keep their own file name; text questions use q<id>.wav)."""
+    return f"voice_notes/replies/{row.get('audio') or 'q%d.wav' % row['id']}"
 def add_a(qid, a):
     with _conn() as c: c.execute("UPDATE questions SET a=?, status='ANSWERED' WHERE id=?", (a.strip()[:1000], qid))
 def unpublish(qid):
@@ -392,6 +416,8 @@ def delete_q(qid):
     if r and r["audio"]:
         for p in (f"voice_notes/incoming/{r['audio']}", f"voice_notes/replies/{r['audio']}"):
             if os.path.exists(p): os.remove(p)
+    p = f"voice_notes/replies/q{qid}.wav"
+    if os.path.exists(p): os.remove(p)
     with _conn() as c: c.execute("DELETE FROM questions WHERE id=?", (qid,))
 def delete_sid(sid):
     with _conn() as c: ids = [r["id"] for r in c.execute("SELECT id FROM questions WHERE sid=?", (sid,))]
@@ -516,16 +542,34 @@ def speak_auto(text):
             continue
     st.caption("🔊 Sauti na bukatar internet kadan")
 
+CLIP_EXT = (".mp3", ".wav", ".m4a", ".ogg")
+def clip_slug(name): return re.sub(r"[^a-z0-9]+", "_", norm(name)).strip("_")
+def find_clip(slug, ff=False):
+    for ext in CLIP_EXT:
+        p = f"voice_audio/{slug}{'_ff' if ff else ''}{ext}"
+        if os.path.exists(p): return p
+    return None
+
 def speak_lga(name, text, lang="Hausa"):
-    """Play a human-recorded clip (voice_audio/<lga>.mp3, or <lga>_ff.mp3 for Fulfulde) if present, else fall back.
+    """Play a human-recorded clip (voice_audio/<lga>.*, or <lga>_ff.* for Fulfulde) if present, else fall back.
     There is no synthetic Fulfulde voice, so Fulfulde never uses TTS."""
-    slug = re.sub(r"[^a-z0-9]+", "_", norm(name)).strip("_")
+    slug = clip_slug(name)
     if lang == "Fulfulde":
-        pf = f"voice_audio/{slug}_ff.mp3"
-        if os.path.exists(pf): st.audio(pf); return
+        pf = find_clip(slug, True)
+        if pf: st.audio(pf); return
         st.caption("🔊 Sautin Fulfulde ba a yi shi ba tukuna — ga na Hausa · Fulfulde audio not recorded yet, playing Hausa")
-    p = f"voice_audio/{slug}.mp3"
-    if os.path.exists(p): st.audio(p)
+    p = find_clip(slug)
+    if p: st.audio(p)
+    else: speak_auto(text)
+
+def speak_kb(k, text, lang="Hausa"):
+    """FAQ answer: play the recorded clip for this fact (voice_audio/faq_<id>.*) if present, else TTS."""
+    slug = f"faq_{k['id']}"
+    if lang == "Fulfulde":
+        pf = find_clip(slug, True)
+        if pf: st.audio(pf); return
+    p = find_clip(slug)
+    if p: st.audio(p)
     else: speak_auto(text)
 
 def wa_link(text): return "https://wa.me/?text=" + quote("MURYA Bauchi - " + text[:400])
@@ -621,6 +665,16 @@ elif page == "Ask":
             st.session_state.notice = None
         st.markdown('<div class="tip"><b>🎤 Ga wanda bai iya rubutu ba</b> — matsa mic ka yi magana kamar WhatsApp. · Tap the mic and speak.</div>', unsafe_allow_html=True)
 
+        # Replies are pulled, not pushed: check for a new answer every 20 s and refresh when one arrives.
+        def _watch_replies():
+            n_ans = sum(1 for r in get_data() if r["sid"] == SID and r["a"].strip())
+            prev = st.session_state.get("seen_ans")
+            st.session_state.seen_ans = n_ans
+            if prev is not None and n_ans > prev: st.rerun()
+        try: st.fragment(run_every=20)(_watch_replies)()
+        except Exception: pass
+        st.button("🔄 Duba amsa · Check for replies")
+
         def send_text():
             q = st.session_state.q_box.strip()
             if not q: return
@@ -684,9 +738,9 @@ elif page == "Ask":
                         if st.button("🗑️ Delete", key=f"del_{it['id']}"): delete_q(it["id"]); st.rerun()
                 if it["a"].strip():
                     st.markdown(f'<div class="ba"><div class="who">✅ MURYA · Amsa tabbatacciya</div>{esc(it["a"])}<div class="bm">An duba · Reviewed by a person</div></div>', unsafe_allow_html=True)
-                    if st.button("🔊 Saurari amsa", key=f"spa_{it['id']}", use_container_width=True): speak_auto(it["a"])
-                    rp = f"voice_notes/replies/{it['audio']}" if it["audio"] else ""
-                    if rp and os.path.exists(rp):
+                    if it["a"] != VOICE_REPLY_TEXT and st.button("🔊 Saurari amsa", key=f"spa_{it['id']}", use_container_width=True): speak_auto(it["a"])
+                    rp = reply_path(it)
+                    if os.path.exists(rp):
                         st.markdown('<div class="ba">🎙️ Amsar murya</div>', unsafe_allow_html=True); st.audio(rp)
                 else:
                     st.markdown('<span class="chip wait">⏳ Ana jiran amsa daga mutum · Awaiting human review</span>', unsafe_allow_html=True)
@@ -710,6 +764,7 @@ elif page == "Ask":
                             if st.button("🔊 Saurari", key=f"spf_{it['id']}"):
                                 lga = lga_hit(it["q"])
                                 if lga: speak_lga(lga, m["a"], it.get("lang") or "Hausa")
+                                elif m.get("id"): speak_kb(m, m["a"], it.get("lang") or "Hausa")
                                 else: speak_auto(m["a"])
         st.write("")
         if st.button("🧹 Goge sakonni na duka · Delete all my messages"):
@@ -742,7 +797,7 @@ elif page == "Verified Info":
                     f'<span class="chip info">Source: {esc(k.get("source",""))}</span><span class="chip ok">Reviewed {esc(k.get("reviewed",""))}</span></div>', unsafe_allow_html=True)
         cc = st.columns([1, 1, 4])
         with cc[0]:
-            if st.button("🔊 Sauti", key=f"faq_{k['id']}"): speak_auto(k["a"])
+            if st.button("🔊 Sauti", key=f"faq_{k['id']}"): speak_kb(k, k["a"], info_lang)
         with cc[1]: st.link_button("🔗 Share", wa_link(f"Q: {k['q']} | A: {k['a']}"))
 
 # =====================================================================
@@ -877,7 +932,7 @@ elif page == "Admin":
                         f'<span class="chip {"ok" if ai_enabled() else "wait"}">AI drafts: {"on" if ai_enabled() else "off"}</span>'
                         f'<span class="chip {"ok" if stt_enabled() else "wait"}">Speech-to-text: {"on" if stt_enabled() else "off"}</span>', unsafe_allow_html=True)
         with top[1]: st.button("Logout", on_click=logout, use_container_width=True)
-        t1, t2, t3, t4, t5 = st.tabs(["📥 Queue", "✅ Published", "📚 Fact base", "🧪 Evaluation", "🗄️ Data & privacy"])
+        t1, t2, t3, t4, t5, t6 = st.tabs(["📥 Queue", "✅ Published", "📚 Fact base", "🧪 Evaluation", "🗄️ Data & privacy", "🎙️ Voice clips"])
         rows = get_data()
 
         def gen_draft(qid):
@@ -925,11 +980,12 @@ elif page == "Admin":
                                   on_click=gen_draft, args=(r["id"],))
                     with c[2]:
                         if st.button("🗑️ Delete", key=f"delq_{r['id']}", use_container_width=True): delete_q(r["id"]); st.rerun()
-                    if r["audio"]:
-                        rv = st.audio_input("🎤 Reply by voice (optional)", key=f"reply_{r['id']}")
-                        if rv is not None:
-                            with open(f"voice_notes/replies/{r['audio']}", "wb") as out: out.write(rv.getbuffer())
-                            st.success("✅ Voice reply saved. Publish a text answer to deliver it.")
+                    rv = st.audio_input("🎤 Reply by voice. It is sent as soon as you stop recording (undo: Published > Unpublish)",
+                                        key=f"reply_{r['id']}")
+                    if rv is not None:
+                        with open(reply_path(r), "wb") as out: out.write(rv.getbuffer())
+                        add_a(r["id"], st.session_state.get(f"adm_{r['id']}", "").strip() or VOICE_REPLY_TEXT)
+                        st.rerun()
 
         with t2:
             done = [r for r in rows if r["a"].strip()]
@@ -1010,6 +1066,51 @@ elif page == "Admin":
                     st.success(f"Imported {n_ok} translation(s). Review each one in Fact base, then press Save Fulfulde.")
                 except Exception:
                     st.error("Could not read that CSV. Keep the id and answer_fulfulde columns.")
+
+        with t6:
+            st.caption("Record each answer in natural Hausa or Fulfulde right here. It is played instead of the robot voice. "
+                       "Clips live on the server: download the ZIP and put the files in your repo's voice_audio/ folder so a restart does not erase them.")
+            os.makedirs("voice_audio", exist_ok=True)
+            by_slug, targets = {}, {}
+            for n in LGA_OFFICES:
+                row = next((k for k in KB if k["q"] == lga_qa(n)[0]), None)
+                targets[f"📍 {n}"] = clip_slug(n); by_slug[clip_slug(n)] = row
+            for k in KB:
+                if k.get("source") != LGA_SRC:
+                    targets[f"❓ FAQ {k['id']}: {k['q'][:40]}"] = f"faq_{k['id']}"; by_slug[f"faq_{k['id']}"] = k
+            lab = st.selectbox("Which answer?", list(targets), key="clip_target")
+            lang_c = st.radio("Language", ["Hausa", "Fulfulde"], horizontal=True, key="clip_lang")
+            base_slug = targets[lab]
+            slug = base_slug + ("_ff" if lang_c == "Fulfulde" else "")
+            row = by_slug.get(base_slug) or {}
+            say = (row.get("a_ff") if lang_c == "Fulfulde" else row.get("a")) or row.get("a", "")
+            st.info("Say: " + str(say).replace(PROVISIONAL, ""))
+            cur = find_clip(base_slug, lang_c == "Fulfulde")
+            if cur: st.audio(cur)
+            else: st.caption("No clip recorded yet.")
+            def _clear_clip():
+                for e in CLIP_EXT:
+                    fp = f"voice_audio/{slug}{e}"
+                    if os.path.exists(fp): os.remove(fp)
+            rec = st.audio_input("🎤 Record", key=f"clip_rec_{slug}")
+            if rec is not None and st.button("💾 Save this recording", key="clip_save"):
+                _clear_clip()
+                with open(f"voice_audio/{slug}.wav", "wb") as f: f.write(rec.getbuffer())
+                st.success("Saved."); st.rerun()
+            up = st.file_uploader("…or upload an audio file recorded on your phone", type=[e[1:] for e in CLIP_EXT], key=f"clip_up_{slug}")
+            if up is not None and st.button("💾 Save uploaded file", key="clip_save_up"):
+                ext = os.path.splitext(up.name)[1].lower()
+                ext = ext if ext in CLIP_EXT else ".mp3"
+                _clear_clip()
+                with open(f"voice_audio/{slug}{ext}", "wb") as f: f.write(up.getbuffer())
+                st.success("Saved."); st.rerun()
+            files = sorted(os.listdir("voice_audio"))
+            if files:
+                import zipfile
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, "w") as z:
+                    for fn in files: z.write(f"voice_audio/{fn}", fn)
+                st.download_button(f"⬇️ Download all {len(files)} clip(s) (ZIP)", buf.getvalue(), "voice_audio.zip", "application/zip")
 
 # =====================================================================
 # CONTACT
