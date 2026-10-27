@@ -357,7 +357,7 @@ def init_db():
         have = {r["name"] for r in c.execute("PRAGMA table_info(questions)")}
         for col, ddl in {"kind": "TEXT DEFAULT 'text'", "audio": "TEXT DEFAULT ''", "lang": "TEXT DEFAULT ''",
                          "flags": "TEXT DEFAULT ''", "ai_draft": "TEXT DEFAULT ''", "ai_risk": "TEXT DEFAULT ''",
-                         "ai_grounded": "INTEGER DEFAULT 0", "stt": "TEXT DEFAULT ''"}.items():
+                         "ai_grounded": "INTEGER DEFAULT 0", "stt": "TEXT DEFAULT ''", "answered_at": "TEXT DEFAULT ''"}.items():
             if col not in have: c.execute(f"ALTER TABLE questions ADD COLUMN {col} {ddl}")
         c.execute("""CREATE TABLE IF NOT EXISTS kb(id INTEGER PRIMARY KEY AUTOINCREMENT,
             q TEXT, a TEXT, keywords TEXT, source TEXT, reviewed TEXT)""")
@@ -438,7 +438,7 @@ def reply_path(row):
     """Where an admin's voice reply is stored (voice questions keep their own file name; text questions use q<id>.wav)."""
     return f"voice_notes/replies/{row.get('audio') or 'q%d.wav' % row['id']}"
 def add_a(qid, a):
-    with _conn() as c: c.execute("UPDATE questions SET a=?, status='ANSWERED' WHERE id=?", (a.strip()[:1000], qid))
+    with _conn() as c: c.execute("UPDATE questions SET a=?, status='ANSWERED', answered_at=? WHERE id=?", (a.strip()[:1000], NOW(), qid))
 def unpublish(qid):
     with _conn() as c: c.execute("UPDATE questions SET a='', status='NEW' WHERE id=?", (qid,))
 def set_draft(qid, res):
@@ -1051,6 +1051,13 @@ elif page == "Admin":
                        "Only confirmed facts ground AI drafts and appear on Verified Info.")
             n_wait = sum(1 for k in KB if not k.get("reviewed"))
             if n_wait: st.warning(f"{n_wait} fact(s) awaiting confirmation.")
+            n_off = sum(1 for k in KB if k.get("source") == LGA_SRC and not k.get("reviewed"))
+            if n_off:
+                if st.button(f"✅ I checked all {n_off} INEC office addresses: confirm them", key="confirm_offices"):
+                    with _conn() as c:
+                        c.execute("UPDATE kb SET reviewed=? WHERE source=? AND (reviewed IS NULL OR reviewed='')",
+                                  (datetime.now().strftime("%Y-%m-%d"), LGA_SRC))
+                    st.rerun()
             for k in KB:
                 mark = "✅" if k.get("reviewed") else "⏳"
                 with st.expander(f"{mark}{' 🌍' if k.get('ff_reviewed') else ''} {k['id']}. {k['q']}"):
