@@ -1,2 +1,7 @@
-streamlit
+streamlit>=1.40
 gTTS
+pandas
+requests
+flask
+africastalking
+gunicorn
