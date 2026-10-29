@@ -244,16 +244,23 @@ LANGS = ["Hausa", "English", "Fulfulde"]
 FF_PENDING = " (Fassarar Fulfulde na jira · Fulfulde translation pending)"
 EN_PENDING = " (Fassarar Turanci na jira · English translation pending)"
 
+def ha_only(text):
+    """Office answers are stored as 'Hausa · English'. Keep the Hausa part plus the confirm sentence."""
+    if " · INEC office, " in text:
+        return text.split(" · INEC office, ")[0].strip() + " Ka tabbatar a inec.gov.ng kafin ka tafi."
+    return text
+
 def pick_answer(m, lang):
     """Return (text, note). Fulfulde is shown only when a native-speaker-reviewed translation exists;
     otherwise the Hausa/English answer is shown with a note (most Fulfulde speakers in Bauchi understand Hausa)."""
-    body = str(m.get("a", "")).replace(PROVISIONAL, "")
+    body_all = str(m.get("a", "")).replace(PROVISIONAL, "")
+    body = ha_only(body_all)
     if lang == "Fulfulde":
         if m.get("a_ff") and m.get("ff_reviewed"): return m["a_ff"], ""
         return body, FF_PENDING
     if lang == "English":
         if m.get("a_en") and m.get("en_reviewed"): return m["a_en"], ""
-        return body, EN_PENDING
+        return body_all, EN_PENDING
     return body, ""
 
 def pick_question(k, lang):
@@ -643,6 +650,93 @@ def kb_save(kid, q, a, kw, src):
                         (q, a, kw, src, datetime.now().strftime("%Y-%m-%d")))
 def kb_delete(kid):
     with _conn() as c: c.execute("DELETE FROM kb WHERE id=?", (kid,))
+
+# --- Polling-unit directory (loaded from the INEC list; nothing is invented or stored per search) ---
+def pu_init():
+    with _conn() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS polling_units(id INTEGER PRIMARY KEY AUTOINCREMENT, lga TEXT, ward TEXT, pu_code TEXT, pu_name TEXT)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_pu_lw ON polling_units(lga, ward)")
+        c.execute("CREATE TABLE IF NOT EXISTS pu_meta(k TEXT PRIMARY KEY, v TEXT)")
+pu_init()
+def pu_meta(k, d=""):
+    with _conn() as c:
+        r = c.execute("SELECT v FROM pu_meta WHERE k=?", (k,)).fetchone()
+        return r["v"] if r else d
+def pu_set_meta(k, v):
+    with _conn() as c: c.execute("INSERT OR REPLACE INTO pu_meta(k,v) VALUES(?,?)", (k, str(v)))
+def pu_count():
+    with _conn() as c: return c.execute("SELECT COUNT(*) FROM polling_units").fetchone()[0]
+def pu_lgas():
+    with _conn() as c: return [r[0] for r in c.execute("SELECT DISTINCT lga FROM polling_units ORDER BY lga")]
+def pu_wards(lga):
+    with _conn() as c: return [r[0] for r in c.execute("SELECT DISTINCT ward FROM polling_units WHERE lga=? ORDER BY ward", (lga,))]
+def pu_units(lga, ward):
+    with _conn() as c: return rows_to_dicts(c.execute("SELECT * FROM polling_units WHERE lga=? AND ward=? ORDER BY pu_code, pu_name", (lga, ward)))
+def pu_search(q, limit=40):
+    q = (q or "").strip()
+    if len(q) < 2: return []
+    like = f"%{q}%"
+    with _conn() as c:
+        return rows_to_dicts(c.execute(
+            "SELECT * FROM polling_units WHERE pu_code LIKE ? OR pu_name LIKE ? OR ward LIKE ? ORDER BY lga, ward, pu_code LIMIT ?",
+            (like, like, like, limit)))
+def pu_clear():
+    with _conn() as c: c.execute("DELETE FROM polling_units")
+
+def pu_map_columns(headers):
+    """Guess which columns hold LGA, ward, polling-unit code and polling-unit name from their headings."""
+    hs = [h for h in headers if h is not None and str(h).strip()]
+    low = {h: str(h).lower().strip() for h in hs}
+    def find(keys, skip=()):
+        for h in hs:
+            if h in skip: continue
+            if any(k in low[h] for k in keys): return h
+        return None
+    code = find(("pu code", "pu_code", "polling unit code", "pucode", "pu number", "pu no", "pu_no", "pu id"))
+    if not code:
+        code = next((h for h in hs if "code" in low[h] and not any(x in low[h] for x in ("ward", "lga", "state", "ra "))), None)
+    lga = find(("lga", "local gov"), skip=(code,))
+    ward = next((h for h in hs if h not in (code, lga) and any(k in low[h] for k in ("ward", "registration area", "reg area"))
+                 and "code" not in low[h]), None)
+    name = next((h for h in hs if h not in (code, lga, ward)
+                 and any(k in low[h] for k in ("polling unit name", "pu name", "pu_name", "polling unit", "name"))
+                 and not any(x in low[h] for x in ("ward", "lga", "state"))), None)
+    return {"lga": lga, "ward": ward, "pu_code": code, "pu_name": name}
+
+def pu_parse(records):
+    """records: list of dicts (one per spreadsheet row). Returns (clean_rows, mapping, skipped)."""
+    if not records: return [], {}, 0
+    mapping = pu_map_columns(list(records[0].keys()))
+    if not (mapping["lga"] and mapping["ward"] and (mapping["pu_name"] or mapping["pu_code"])):
+        return [], mapping, len(records)
+    clean = lambda v: re.sub(r"\s+", " ", str(v if v is not None else "")).strip()
+    rows, skipped = [], 0
+    for r in records:
+        lga, ward = clean(r.get(mapping["lga"])), clean(r.get(mapping["ward"]))
+        code = clean(r.get(mapping["pu_code"])) if mapping["pu_code"] else ""
+        name = clean(r.get(mapping["pu_name"])) if mapping["pu_name"] else ""
+        name = name or code
+        if not (lga and ward and name) or lga.upper().startswith("EXAMPLE"):
+            skipped += 1; continue
+        rows.append((lga, ward, code, name))
+    return rows, mapping, skipped
+
+def pu_read_upload(upload):
+    """Read an uploaded CSV or Excel file into a list of dicts."""
+    raw = upload.getvalue()
+    if upload.name.lower().endswith((".xlsx", ".xls")):
+        df = pd.read_excel(io.BytesIO(raw), dtype=str).fillna("")
+        return df.to_dict("records")
+    try: text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError: text = raw.decode("latin-1")
+    head = text.splitlines()[0] if text.strip() else ""
+    delim = ";" if head.count(";") > head.count(",") else ("\t" if head.count("\t") > head.count(",") else ",")
+    return list(csv.DictReader(io.StringIO(text), delimiter=delim))
+
+def pu_replace(rows):
+    with _conn() as c:
+        c.execute("DELETE FROM polling_units")
+        c.executemany("INSERT INTO polling_units(lga,ward,pu_code,pu_name) VALUES(?,?,?,?)", rows)
 def kb_save_ff(kid, text):
     """Saving a Fulfulde answer in Admin counts as a native-speaker review (sets ff_reviewed)."""
     t = text.strip()[:1000]
@@ -796,12 +890,247 @@ def wa_link(text): return "https://wa.me/?text=" + quote("MURYA Bauchi - " + tex
 # =====================================================================
 # SESSION
 # =====================================================================
-PAGES = ["Home", "Ask", "Verified Info", "Learn", "Dashboard", "Responsible AI", "Privacy", "Admin", "Contact"]
+PAGES = ["Home", "Ask", "Verified Info", "Polling Units", "Learn", "Dashboard", "Responsible AI", "Privacy", "Admin", "Contact"]
 defaults = {"nav": "Home", "voice_key": 0, "notice": None, "is_admin": False, "fails": 0, "lock_until": 0.0,
             "login_msg": "", "sid": uuid.uuid4().hex[:8], "consent": False}
 for k, v in defaults.items():
     if k not in st.session_state: st.session_state[k] = v
 IS_ADMIN, SID = st.session_state.is_admin, st.session_state.sid
+
+# =====================================================================
+# LANGUAGE LAYER: every page except Privacy, Learn (both always show Hausa + English) and Admin (staff, English).
+# UI[key] = (Hausa, English, Fulfulde-or-None). Fulfulde falls back to Hausa until a native speaker has reviewed
+# it (Admin > Languages). Hausa and English are the reference texts.
+# =====================================================================
+UI = {
+ # ---- header / navigation
+ "brand_sub": ("Muryar Zabe · Bauchi", "Voice of the Election · Bauchi", None),
+ "pill": ("Aikin fasahar al'umma mai zaman kansa · ba samfurin INEC ba ne", "Independent civic-tech project · not an official INEC product", None),
+ "nav_Home": ("Gida", "Home", None), "nav_Ask": ("Tambaya", "Ask", None),
+ "nav_Verified_Info": ("Bayanai tabbatattu", "Verified Info", None), "nav_Polling_Units": ("Rumfunan zabe", "Polling Units", None),
+ "nav_Learn": ("Koyo", "Learn", None), "nav_Dashboard": ("Alkaluma", "Dashboard", None),
+ "nav_Responsible_AI": ("AI mai alhaki", "Responsible AI", None), "nav_Privacy": ("Kariyar bayanai", "Privacy", None),
+ "nav_Admin": ("Admin", "Admin", None), "nav_Contact": ("Tuntuɓa", "Contact", None),
+ "lang_label": ("Harshe", "Language", "Ɗemngal"),
+ "big_text": ("🔠 Babban rubutu", "🔠 Large text", None), "hi_contrast": ("◐ Launi mai ƙarfi", "◐ High contrast", None),
+ "ff_notice": ("Fulfulde: ana shirya shi tare da mai magana na asali; ana nuna Hausa a yanzu.",
+               "Fulfulde: being reviewed by a native speaker; Hausa is shown for now.", None),
+ # ---- home
+ "hero_badge1": ("Gasar AI4Elections 2026–2027", "AI4Elections Hackathon 2026–2027", None),
+ "hero_badge2": ("Mataki na 3 · Fasahar zabe da al'umma mai haɗa kowa da harsuna da yawa", "Track 3 · Inclusive & Multilingual Electoral/Civic Technology", None),
+ "hero_h1": ("Ka tambaya da Hausa. Ka sami amsa tabbatacciya. Ka saurara.", "Ask in Hausa. Get a verified answer. Listen to it.", None),
+ "hero_p": ("Ka tambaya da Hausa, Fulfulde ko Turanci. MURYA wurin taimako ne na bayanan zabe a Bauchi wanda ya fi mayar da hankali kan murya: mutum na gaske yana duba kowace amsa da tushen INEC na hukuma kafin a wallafa ta. Ba sai ka iya karatu, rubutu ko fahimtar Turanci ba.",
+            "Ask in Hausa, Fulfulde or English. MURYA is a voice-first election-information helpdesk for Bauchi: a real person checks every answer against official INEC sources before it is published. You do not need to read, write or understand English to use it.", None),
+ "hero_src": ("<b>Bayanan da aka tabbatar da INEC</b> · An duba su da tushen INEC (inec.gov.ng).<br>MURYA aiki ne mai zaman kansa, ba samfurin INEC ba.",
+              "<b>Information checked against INEC sources</b> (inec.gov.ng).<br>MURYA is an independent project, not an INEC product.", None),
+ "what_do": ("Me kake so ka yi?", "What would you like to do?", None),
+ "act_ask": ("🎤  Tambaya da murya", "🎤  Ask by voice", "🎤  Ƴamu ƴamol e daande"),
+ "act_dates": ("🗓️  Yaushe zabe?", "🗓️  Election dates", None),
+ "act_learn": ("🛡️  Kauce wa labaran ƙarya", "🛡️  Spot fake messages", None),
+ "act_office": ("📍  Ina ofishin INEC?", "📍  Find your INEC office", "📍  Holto woni ofis INEC?"),
+ "act_pu": ("🗳️  Ina rumfar zabe?", "🗳️  Find polling units", None),
+ "act_priv": ("🔒  Tsaron bayanai", "🔒  Data protection", None),
+ "stat_40": ("Masu zabe a Bauchi masu wahalar fahimtar rubutun INEC na Turanci", "Bauchi voters struggle with English INEC text", None),
+ "stat_51": ("Masu rajistar zabe a Bauchi", "Registered voters in Bauchi", None),
+ "stat_20": ("Ƙananan hukumomi", "Local government areas", None),
+ "stat_lang": ("Rubutu da murya", "Text and voice", None),
+ "how_title": ("Yadda take aiki", "How it works", None),
+ "step1_t": ("Tambaya", "Ask", None), "step1_d": ("Rubuta ko ka naɗa saƙon murya da Hausa, Fulfulde ko Turanci.", "Type or record a voice note in Hausa, Fulfulde or English.", None),
+ "step2_t": ("Fahimta", "Understand", None), "step2_d": ("AI na rubuta muryar, ta daidaita ta da FAQ ɗin da aka tabbatar, kuma tana nuna jita-jita ko saƙon damfara don dubawa.", "AI transcribes speech, matches it to verified FAQs and flags rumours or spam for review.", None),
+ "step3_t": ("Tabbatarwa", "Verify", None), "step3_d": ("Mutum yana duba duk wani daftarin AI da shafin INEC. AI ba ta wallafa komai da kanta.", "A person reviews any AI draft against the INEC portal. AI never publishes by itself.", None),
+ "step4_t": ("Saurara da rabawa", "Listen & share", None), "step4_d": ("Ka saurari amsar da murya, ko ka raba amsar da aka tabbatar a WhatsApp don yaƙar labaran ƙarya.", "Hear the answer read aloud, or share the verified answer on WhatsApp to counter fake news.", None),
+ "why_title": ("Me ya sa yake da muhimmanci", "Why it matters", None),
+ "why_p": ("Masu zabe da yawa a Bauchi suna jin Hausa sosai amma ba sa iya karanta sanarwar INEC ta Turanci cikin sauƙi. Jita-jita game da karɓar PVC da ranakun zabe na yaɗuwa da sauri fiye da bayanan hukuma. MURYA na kai amsoshin da aka tabbatar ga mutane da harshe da salon da za su iya amfani da shi — <b>Hausa ta baka</b>.",
+           "Many Bauchi voters speak Hausa fluently but cannot comfortably read English INEC notices. Rumours about PVC collection and election dates travel faster than official information. MURYA brings verified answers to people in the language and format they can use — <b>spoken Hausa</b>.", None),
+ "chip_ai": ("AI na taimako", "AI-assisted", None), "chip_human": ("Mutum ne ke amincewa", "Human-approved", None), "chip_priv": ("Sirri da farko", "Privacy-first", None),
+ "built_by": ("Wanda ya gina", "Built by", None),
+ "built_desc": ("— mai gina fasahar al'umma, Bauchi, Najeriya.", "— civic-tech builder, Bauchi, Nigeria.", None),
+ # ---- ask
+ "ask_title": ("### 🎤 Tambayi MURYA", "### 🎤 Ask MURYA", None),
+ "consent_card": ("""<div class="card"><h3>Kafin ka fara</h3>
+        <p>• Ana adana tambayarka (rubutu ko murya) don mutum ya amsa ta. <b>Kada ka bayar da lambar PVC, lambar waya ko adireshin gida.</b><br>
+        • AI na iya rubuta muryarka da kuma ba da daftarin amsa; <b>mutum ne ke amincewa da kowace amsa</b>.<br>
+        • Kana iya goge duk abin da ka aika daga wannan shafin a kowane lokaci. Ana kuma goge saƙonni ta atomatik bayan kwana {days}. Cikakken bayani yana shafin <b>Kariyar bayanai</b>.<br>
+        • Kai da masu duba MURYA kaɗai ke ganin saƙonninka. Ana iya nuna amsoshin da aka tabbatar a bainar jama'a <b>ba tare da</b> bayyana ka ba.</p></div>""",
+                  """<div class="card"><h3>Before you start</h3>
+        <p>• Your question (text or voice) is stored so a person can answer it. <b>Do not share your PVC number, phone number or home address.</b><br>
+        • AI may transcribe your voice and suggest a draft; <b>a person approves every answer</b>.<br>
+        • You can delete everything you sent from this page at any time. Messages are also deleted automatically after {days} days. Full details: the <b>Privacy</b> page.<br>
+        • Only you and the MURYA reviewers can see your messages. Verified answers may be shown publicly <b>without</b> your identity.</p></div>""", None),
+ "consent_cb": ("Na fahimta kuma na yarda", "I understand and agree", "Mi faami, mi jaɓi"),
+ "tip_mic": ("<b>🎤 Ga wanda bai iya rubutu ba</b> — matsa mic ka yi magana kamar WhatsApp.", "<b>🎤 Can't type?</b> Tap the mic and speak, like WhatsApp.", None),
+ "check_replies": ("🔄 Duba amsa", "🔄 Check for replies", None),
+ "too_many": ("Kun aika tambayoyi da yawa. Ku jira kaɗan.", "Too many messages, please wait a while.", None),
+ "sent": ("✅ An aika! Za a duba a ba ka amsa.", "✅ Sent! A person will review it.", "✅ Neldaama! Neɗɗo hokkan ma jaabawol."),
+ "lang_caption": ("🌍 Harshe: **{lang}** (ka canza a sama)", "🌍 Language: **{lang}** (change it at the top)", None),
+ "ph": ("Yaya zan duba PVC dina a Bauchi?", "How do I check my PVC status in Bauchi?", "Noy mi yi'ata PVC am nder Bauchi?"),
+ "send": ("🚀 Aika tambaya", "🚀 Send", "🚀 Neldu"),
+ "voice_cap": ("🎤 Murya", "🎤 Voice", None),
+ "too_many_short": ("Kun aika da yawa. Ku jira kaɗan.", "You have sent too many. Please wait.", None),
+ "voice_big": ("Muryar ta yi yawa — ƙasa da 10MB.", "The recording is too large (under 10MB).", None),
+ "transcribing": ("Ana rubuta muryarka...", "Transcribing your voice...", None),
+ "voice_ok": ("✅ Mun karɓi muryarka!", "✅ Voice note received.", None),
+ "no_msgs": ("Babu saƙonni tukuna — fara tambaya a sama.", "No messages yet — ask a question above.", None),
+ "voice_msg": ("🎤 Saƙon murya", "🎤 Voice message", None), "voice_msg_plain": ("Saƙon murya", "Voice message", None),
+ "we_heard": ("Abin da muka ji:", "We heard:", None),
+ "not_transcribed": ("(Ba a rubuta muryar ba — mutum zai saurara)", "(Not transcribed; a reviewer will listen)", None),
+ "you": ("Kai", "You", None), "share": ("🔗 Raba", "🔗 Share", None), "sound": ("🔊 Sauti", "🔊 Listen", None), "delete": ("🗑️ Goge", "🗑️ Delete", None),
+ "ans_head": ("✅ MURYA · Amsa tabbatacciya", "✅ MURYA · Verified answer", None),
+ "reviewed_person": ("Mutum ya duba", "Reviewed by a person", None),
+ "listen_answer": ("🔊 Saurari amsa", "🔊 Listen to the answer", None),
+ "voice_ans": ("🎙️ Amsar murya", "🎙️ Voice reply", None),
+ "thanks": ("🙏 Na gode!", "🙏 Thank you for your feedback.", None),
+ "helpful_yes": ("👍 Ya taimaka", "👍 Helpful", None), "helpful_no": ("👎 Bai taimaka ba", "👎 Not helpful", None),
+ "awaiting": ("⏳ Ana jiran amsa daga mutum", "⏳ Awaiting human review", "⏳ Ina reeni neɗɗo ƴeewta"),
+ "prelim": ("⏳ Bayani na farko", "⏳ Preliminary info", "⏳ Habaru adannde"),
+ "awaiting_conf": ("Ana jiran tabbatarwa daga mutum", "Awaiting human confirmation", "Ina reeni neɗɗo tabbatina"),
+ "related_verified": ("📌 Tabbataccen bayani mai alaƙa", "📌 Related verified FAQ", None),
+ "source": ("Tushe", "Source", None), "reviewed_word": ("an duba", "reviewed", None), "reviewed_cap": ("An duba", "Reviewed", None),
+ "listen_short": ("🔊 Saurari", "🔊 Listen", None),
+ "delete_all": ("🧹 Goge duk saƙonnina", "🧹 Delete all my messages", None),
+ "deleted": ("An goge saƙonni {k}.", "{k} message(s) deleted.", None),
+ "ff_pending": ("Fassarar Fulfulde na jira", "Fulfulde translation pending", None),
+ "en_pending": ("Fassarar Turanci na jira", "English translation pending", None),
+ # ---- verified info
+ "vi_title": ("✅ Bayanan INEC tabbatattu", "✅ Verified INEC information", None),
+ "vi_tip": ("Kowane abu a cikin jerin da ke ƙasa mutum ne ya rubuta ko ya amince da shi kuma an duba shi da tushen INEC na hukuma. Babu wani abu a nan da AI ta ƙirƙira.",
+            "Every item in the list below was written or approved by a person and checked against official INEC sources. Nothing here is AI-generated.", None),
+ "vi_office_h": ("#### 📍 Ina ofishin INEC na karamar hukumarka?", "#### 📍 Where is the INEC office in your local government?", "#### 📍 Holto woni ofis INEC nder hukuma maaɗa?"),
+ "vi_choose_lga": ("Zaɓi karamar hukumarka", "Choose your LGA", "Suɓtu hukuma maaɗa"),
+ "vi_faq_h": ("#### Tambayoyi da amsoshi", "#### Questions and answers", None),
+ # ---- polling units
+ "pu_title": ("### 🗳️ Rumfunan zabe", "### 🗳️ Find polling units", None),
+ "pu_tip": ("Wannan jerin rumfunan zabe ne a unguwarka. Ka tabbatar da rumfar da ka yi rajista a katin zabe ko a ofishin INEC kafin ranar zabe. Ba a ajiye abin da ka nema.",
+            "This lists polling units in a ward. Confirm which one is yours on your PVC or with INEC before election day. Your search is not saved.", None),
+ "pu_none": ("Ana jiran jerin rumfunan zabe daga INEC.", "The polling-unit list from INEC is being added.", None),
+ "pu_conf": ("✅ An tabbatar da INEC · Tushe: {src} · Jerin ya kai ranar {asof}", "✅ Confirmed by INEC · Source: {src} · List as of {asof}", None),
+ "pu_prov": ("⏳ Ana jiran tabbatarwa daga INEC · Tushe: {src} · Jerin ya kai ranar {asof}", "⏳ Awaiting INEC confirmation · Source: {src} · List as of {asof}", None),
+ "pu_mode": ("Yadda za ka nema", "How to search", None),
+ "pu_mode_ward": ("Ta unguwa", "By ward", None), "pu_mode_code": ("Ta lamba ko suna", "By code or name", None),
+ "pu_lga": ("Karamar hukuma", "LGA", None), "pu_ward": ("Unguwa", "Ward", None),
+ "pu_q": ("Lambar rumfa ko suna", "Polling unit code or name", None),
+ "pu_nothing": ("Babu abin da aka samu.", "Nothing found.", None),
+ "pu_count": ("{n} rumfa", "{n} polling unit(s)", None),
+ "pu_first60": ("Ana nuna 60 na farko. Ka ƙara ƙayyade nemanka.", "Showing the first 60. Narrow your search.", None),
+ # ---- dashboard
+ "dash_title": ("### 📊 Alkaluman tasiri", "### 📊 Impact dashboard", None),
+ "dash_caption": ("Alkaluma ne kawai. Ba a nuna saƙonnin sirri a nan.", "Aggregate figures only. Private messages are never shown here.", None),
+ "dash_total": ("Jimillar tambayoyi", "Total questions", None), "dash_answered": ("An amsa kuma an tabbatar", "Answered & verified", None),
+ "dash_waiting": ("Ana jiran dubawa", "Awaiting review", None), "dash_voice": ("Saƙonnin murya", "Voice notes", None),
+ "dash_rated": ("👍 {pct}% na amsoshi {n} da aka ba da ra'ayi a kansu sun taimaka", "👍 {pct}% of {n} rated answers were found helpful", None),
+ "dash_nodata": ("Babu bayanai tukuna — tambayoyi za su bayyana a nan a matsayin alkaluma.", "No data yet — questions will appear here as aggregates.", None),
+ "dash_perday": ("Tambayoyi a kowace rana", "Questions per day", None), "dash_textvoice": ("Rubutu da murya", "Text vs voice", None),
+ "dash_about": ("Abin da mutane ke tambaya a kai", "What citizens ask about", None),
+ "dash_barriers": ("Cikas na yanayi da samun damar zabe da mutane ke ambata", "Weather & access barriers people mention", None),
+ "dash_barriers_cap": ("Adadi ne daga kalmomin da mutane suka yi amfani da su. Ba a nuna suna ko saƙo.", "Aggregate counts from the words people used. No names, no messages shown.", None),
+ "dash_latest": ("Sabbin amsoshin da aka tabbatar (na jama'a)", "Latest verified answers (public)", None),
+ "dash_nopublic": ("Babu amsoshin jama'a tukuna.", "No public answers yet.", None),
+ "dash_other": ("Wasu / ba a daidaita ba", "Other / unmatched", None), "dash_office": ("Wuraren ofisoshi", "Office locations", None),
+ # ---- responsible AI
+ "ra_title": ("### 🛡️ AI mai alhaki, sirri da iyaka", "### 🛡️ Responsible AI, privacy & limitations", None),
+ "ra_ai": ("""<div class="card"><h3>Inda ake amfani da AI</h3><ul>
+        <li><b>Rubuta murya</b> na maida muryar Hausa/Turanci zuwa rubutu (idan an kunna).</li>
+        <li><b>Neman amsa</b> na daidaita tambaya da FAQ ɗin da mutum ya tabbatar. Ba a ƙirƙira komai ba.</li>
+        <li><b>Mataimakin daftari</b> yana ba da shawarar amsa ta amfani da <i>kawai</i> bayanan da aka tabbatar. Dole ne ya ce "ba a samu tushe ba" idan bayanan ba su ƙunshi tambayar ba.</li>
+        <li><b>Alamomin haɗari</b> suna nuna hanyoyin haɗi, tayin sayen kuri'a, jita-jita, lambobin waya da abubuwan jam'iyya ga masu duba.</li></ul></div>""",
+           """<div class="card"><h3>Where AI is used</h3><ul>
+        <li><b>Speech-to-text</b> turns Hausa/English voice notes into text (when enabled).</li>
+        <li><b>Retrieval</b> matches a question to human-verified FAQs. Nothing is generated.</li>
+        <li><b>Draft assistant</b> proposes a reply using <i>only</i> the confirmed fact base. It must say "not grounded" when facts do not cover the question.</li>
+        <li><b>Risk flags</b> highlight links, vote-buying offers, rumours, phone numbers and partisan content for reviewers.</li></ul></div>""", None),
+ "ra_never": ("""<div class="card"><h3>Abin da AI ba ta taɓa yi ba</h3><ul>
+        <li>Wallafa amsa da kanta. Mutum ne ke amincewa da kowace amsa.</li>
+        <li>Bayyana ra'ayi kan jam'iyyu, ƴan takara ko sakamako.</li>
+        <li>Amfani da ainihin rajistar masu zabe ko tsarin INEC na sirri.</li>
+        <li>Yin niyya ko lallashin masu zabe.</li></ul></div>""",
+              """<div class="card"><h3>What AI never does</h3><ul>
+        <li>Publish an answer on its own. A person approves every answer.</li>
+        <li>Express views on parties, candidates or results.</li>
+        <li>Use real voter registers or confidential INEC systems.</li>
+        <li>Target or persuade voters.</li></ul></div>""", None),
+ "ra_incl": ("""<div class="card"><h3>Haɗa kowa tun daga tsari</h3><ul>
+        <li>Hausa a gaba, Turanci da Fulfulde tare da ita. Murya a shigo, murya a fito.</li>
+        <li>Jerin karamar hukuma don danna kawai ga wanda ba ya iya rubutu ko karatu.</li>
+        <li>Ana nuna wuraren ofisoshin INEC a matsayin <b>"ana jiran tabbatarwa daga mutum"</b> har sai mutum ya tabbatar da su.</li></ul></div>""",
+             """<div class="card"><h3>Inclusion by design</h3><ul>
+        <li>Hausa first, English and Fulfulde alongside. Voice in, voice out.</li>
+        <li>Tap-to-pick LGA list for people who cannot type or read well.</li>
+        <li>Office locations from INEC's directory are always shown as <b>"awaiting human confirmation"</b> until a person confirms them.</li></ul></div>""", None),
+ "ra_priv": ("""<div class="card"><h3>Sirri tun daga tsari</h3><ul>
+        <li>Ana neman yarda a fili kafin a adana kowane saƙo.</li>
+        <li>Masu amfani na ganin saƙonninsu kawai kuma suna iya goge su da danna ɗaya.</li>
+        <li>Ba a neman sunaye, lambobin PVC ko lambobin waya.</li>
+        <li>Admin na iya tsara tsawon ajiya: ana iya goge tsofaffin saƙonni da sauti.</li>
+        <li>Shafukan jama'a suna nuna alkaluma da amsoshin da aka amince da su kawai.</li>
+        <li>Shiga admin na amfani da kalmar sirri da aka ɓoye kuma ana kulle shi bayan gwaji da yawa.</li></ul></div>""",
+            """<div class="card"><h3>Privacy by design</h3><ul>
+        <li>Explicit consent before any message is stored.</li>
+        <li>Users see only their own messages and can delete them in one tap.</li>
+        <li>No names, PVC numbers or phone numbers are requested.</li>
+        <li>Admin-controlled retention: old messages and audio can be purged by age.</li>
+        <li>Public pages show aggregates and approved answers only.</li>
+        <li>Admin access uses a salted, hashed password with login lockout.</li></ul></div>""", None),
+ "ra_lim": ("""<div class="card"><h3>Gaskiya game da iyakoki</h3><ul>
+        <li>Fahimtar murya ta Hausa ba ta kai ta Turanci daidaito ba; mai dubawa na iya sauraron ainihin sautin koyaushe.</li>
+        <li>Amsoshin Fulfulde suna fitowa ne kawai bayan mai magana na asali ya tabbatar. Babu rubuta murya ko muryar kwamfuta ta Fulfulde tukuna, don haka saƙonnin murya na Fulfulde suna tafiya kai tsaye wajen mutum mai saurara.</li>
+        <li>Muryar kwamfuta ba ta da Hausa na asali, don haka amsoshin Hausa suna amfani da muryoyin da aka naɗa inda suke.</li>
+        <li>Tushen bayanan da aka tabbatar ƙarami ne kuma ana kula da shi da hannu.</li>
+        <li>Mai dubawa ɗaya na zama cikas. Faɗaɗawa na buƙatar masu aikin sa kai da aka horar da jadawalin aiki.</li>
+        <li>Kyautar ɗaukar bayanai (free hosting) na iya share bayanan da aka adana idan an sake kunnawa; ana buƙatar ma'ajiya ta ƙwarai don amfani na gaske.</li>
+        <li>Babu yanayin offline tukuna. Harsuna fiye da Hausa, Turanci da Fulfulde aiki ne na gaba.</li></ul></div>""",
+           """<div class="card"><h3>Honest limitations</h3><ul>
+        <li>Hausa speech recognition is less accurate than English; a reviewer can always play the original audio.</li>
+        <li>Fulfulde answers appear only after a native speaker confirms them. There is no Fulfulde speech-to-text or synthetic voice yet, so Fulfulde voice notes go straight to a human listener.</li>
+        <li>Synthetic text-to-speech has no native Hausa voice, so Hausa answers use human-recorded clips where available.</li>
+        <li>The verified fact base is small and manually maintained.</li>
+        <li>One reviewer is a bottleneck. Scaling needs trained volunteers and shift rosters.</li>
+        <li>Free hosting may erase stored data on restart; a managed database is needed for production.</li>
+        <li>No offline mode yet. Languages beyond Hausa, English and Fulfulde are future work.</li></ul></div>""", None),
+ "ra_selftest": ("""<div class="card"><h3>Gwajin kai kai tsaye (yana gudana kan FAQ ɗin da aka tabbatar)</h3>
+                <p>Neman FAQ: <b>{hit}/{n}</b> daidai · Alamomin haɗari: <b>{fhit}/{fn}</b> daidai. Mai ginawa ne ya rubuta tambayoyin da hannu, kuma an yi amfani da wani ɓangare wajen gyara na'urar daidaita tambaya: gwajin tabbatarwa ne kawai, ba ma'auni ba. Ana auna daidaito da masu amfani na gaske a gwajin farko (pilot).</p></div>""",
+                 """<div class="card"><h3>Live self-test (runs on the current verified FAQs)</h3>
+                <p>FAQ retrieval: <b>{hit}/{n}</b> correct · Risk flags: <b>{fhit}/{fn}</b> correct. Hand-written by the developer, and partly used to tune the matcher: a sanity check, not a benchmark. Accuracy with real users is measured in the pilot.</p></div>""", None),
+ "ra_details": ("Duba cikakken bayanin gwajin", "See test details", None),
+ # ---- contact + footer
+ "contact_card": ("""<div class="card"><h3>📞 Tuntuɓa</h3>
+    <p><b>MURYA — Muryar Zabe</b><br>Fasahar zabe da al'umma mai haɗa kowa da harsuna da yawa · Bauchi, Najeriya<br><br>
+    Zaharaddeen Muhammad ne ya gina ta domin Gasar AI4Elections 2026–2027.<br><br>
+    Don tuntuɓar ƙungiyar, yi amfani da shafin <b>Tambaya</b>. Mutum yana karanta kowane saƙo.<br><br>
+    <i>MURYA aikin fasahar al'umma ne mai zaman kansa. Ba ta da alaƙa da INEC, kuma INEC ba ta amince da ita ba. Kullum ka tabbatar da muhimman bayanai a <b>inec.gov.ng</b> ko a ofishin INEC na yankinka.</i></p></div>""",
+                  """<div class="card"><h3>📞 Contact</h3>
+    <p><b>MURYA — Muryar Zabe</b><br>Inclusive & Multilingual Electoral/Civic Technology · Bauchi, Nigeria<br><br>
+    Built by <b>Zaharaddeen Muhammad</b> for the AI4Elections Hackathon 2026–2027.<br><br>
+    To reach the team, use the <b>Ask</b> page. A person reads every message.<br><br>
+    <i>MURYA is an independent civic-tech project. It is not affiliated with, or endorsed by, INEC. Always confirm critical
+    information on <b>inec.gov.ng</b> or at your local INEC office.</i></p></div>""", None),
+ "foot_src": ("Bayanan INEC · Tushe na hukuma: inec.gov.ng", "INEC information · Official source: inec.gov.ng", None),
+ "foot_l1": ("Aikin fasahar al'umma mai zaman kansa · Ba samfurin INEC ba ne · AI na taimako, mutum ne ke amincewa",
+             "Independent civic-tech project · Not an official INEC product · AI-assisted, human-approved", None),
+ "foot_l2": ("Zaharaddeen Muhammad ne ya gina · Bauchi, Najeriya · Gasar AI4Elections 2026–2027",
+             "Built by Zaharaddeen Muhammad · Bauchi, Nigeria · AI4Elections Hackathon 2026–2027", None),
+}
+UI_FF_OVR = {}   # Fulfulde corrections from the native-speaker reviewer (loaded below)
+
+def kv_get(k, d=""): return pu_meta(k, d)
+def kv_set(k, v): pu_set_meta(k, v)
+try: UI_FF_OVR = json.loads(kv_get("ff_ui_overrides", "{}") or "{}")
+except Exception: UI_FF_OVR = {}
+def ff_ui_live(): return IS_ADMIN or kv_get("ff_ui_live") == "1"
+
+def tx(key, **kw):
+    """Interface text in the language chosen with the language switch (Hausa / English / Fulfulde)."""
+    ha, en, ff = UI[key]
+    lang = st.session_state.get("lang_choice", "Hausa")
+    if lang == "English": out = en
+    elif lang == "Fulfulde" and ff_ui_live(): out = UI_FF_OVR.get(key) or ff or ha
+    else: out = ha
+    return out.format(**kw) if kw else out
+
+def loc_note(note):
+    """Translate the 'translation pending' notes added by pick_answer."""
+    if note == FF_PENDING: return " (" + tx("ff_pending") + ")"
+    if note == EN_PENDING: return " (" + tx("en_pending") + ")"
+    return note
 
 def go(p): st.session_state.nav = p
 def agree(): st.session_state.consent = True
@@ -818,20 +1147,24 @@ def stat(col, n, label):
 # =====================================================================
 st.markdown(f"""
 <div class="brand"><div class="brand-l"><img class="logo-img" src="{MURYA_LOGO_URI}" alt="MURYA logo">
-<div><div class="brand-name">MURYA</div><div class="brand-sub">Muryar Zabe · Voice of the Election · Bauchi</div></div></div>
-<div class="pill-note">Independent civic-tech project · not an official INEC product</div></div>
+<div><div class="brand-name">MURYA</div><div class="brand-sub">{tx("brand_sub")}</div></div></div>
+<div class="pill-note">{tx("pill")}</div></div>
 """, unsafe_allow_html=True)
-st.radio("Navigation", PAGES, horizontal=True, key="nav", label_visibility="collapsed")
+st.radio("Navigation", PAGES, horizontal=True, key="nav", label_visibility="collapsed",
+         format_func=lambda p_: tx("nav_" + p_.replace(" ", "_")))
 page = st.session_state.nav
 _lc1, _lc2 = st.columns([3, 2])
-with _lc1: st.radio("Harshe · Language", LANGS, horizontal=True, key="lang_choice")
+with _lc1:
+    st.radio(tx("lang_label"), LANGS, horizontal=True, key="lang_choice")
+    if st.session_state.get("lang_choice") == "Fulfulde" and not ff_ui_live():
+        st.caption(tx("ff_notice"))
 with _lc2:
     try:
-        st.toggle("🔠 Babban rubutu · Large text", key="big_text")
-        st.toggle("◐ Launi mai ƙarfi · High contrast", key="hi_contrast")
+        st.toggle(tx("big_text"), key="big_text")
+        st.toggle(tx("hi_contrast"), key="hi_contrast")
     except Exception:
-        st.checkbox("🔠 Babban rubutu · Large text", key="big_text")
-        st.checkbox("◐ Launi mai ƙarfi · High contrast", key="hi_contrast")
+        st.checkbox(tx("big_text"), key="big_text")
+        st.checkbox(tx("hi_contrast"), key="hi_contrast")
 if st.session_state.get("big_text"):
     st.markdown("<style>.block-container{zoom:1.18;}</style>", unsafe_allow_html=True)
 if st.session_state.get("hi_contrast"):
@@ -893,66 +1226,55 @@ if page == "Home":
     <div class="hero">
       <img class="hero-mark" src="{MURYA_LOGO_URI}" alt="MURYA">
       <div class="hero-body">
-        <span class="badge">AI4Elections Hackathon 2026–2027</span>
-        <span class="badge">Track 3 · Inclusive & Multilingual Electoral/Civic Technology</span>
-        <h1>Ka tambaya da Hausa. Ka sami amsa tabbatacciya. Ka saurara.</h1>
-        <p>Ask in Hausa, Fulfulde or English. Get a verified answer. Listen to it. MURYA is a voice-first election-information
-        helpdesk for Bauchi: a real person checks every answer against official INEC sources before it is published.
-        You do not need to read, write or understand English to use it.</p>
+        <span class="badge">{tx("hero_badge1")}</span>
+        <span class="badge">{tx("hero_badge2")}</span>
+        <h1>{tx("hero_h1")}</h1>
+        <p>{tx("hero_p")}</p>
       </div>
-      <div class="hero-src">{inec_logo_html(34)}<span><b>Bayanan da aka tabbatar da INEC</b> · Information checked against INEC sources (inec.gov.ng).<br>MURYA is an independent project, not an INEC product.</span></div>
+      <div class="hero-src">{inec_logo_html(34)}<span>{tx("hero_src")}</span></div>
     </div>""", unsafe_allow_html=True)
-    st.markdown('<div class="sec">Me kake so ka yi? · What would you like to do?</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sec">{tx("what_do")}</div>', unsafe_allow_html=True)
     g1, g2 = st.columns(2)
     with g1:
-        st.button("🎤  Tambaya da murya · Ask by voice", type="primary", use_container_width=True, on_click=go, args=("Ask",), key="act_ask")
-        st.button("🗓️  Yaushe zabe? · Election dates", use_container_width=True, on_click=go, args=("Verified Info",), key="act_dates")
-        st.button("🛡️  Kauce wa labaran ƙarya · Spot fake messages", use_container_width=True, on_click=go, args=("Learn",), key="act_learn")
+        st.button(tx("act_ask"), type="primary", use_container_width=True, on_click=go, args=("Ask",), key="act_ask")
+        st.button(tx("act_dates"), use_container_width=True, on_click=go, args=("Verified Info",), key="act_dates")
+        st.button(tx("act_learn"), use_container_width=True, on_click=go, args=("Learn",), key="act_learn")
     with g2:
-        st.button("📍  Ina ofishin INEC? · Find your INEC office", use_container_width=True, on_click=go, args=("Verified Info",), key="act_office")
-        st.button("🔒  Tsaron bayanai · Data protection", use_container_width=True, on_click=go, args=("Privacy",), key="act_priv")
+        st.button(tx("act_office"), use_container_width=True, on_click=go, args=("Verified Info",), key="act_office")
+        st.button(tx("act_pu"), use_container_width=True, on_click=go, args=("Polling Units",), key="act_pu")
+        st.button(tx("act_priv"), use_container_width=True, on_click=go, args=("Privacy",), key="act_priv")
     st.write("")
     s = st.columns(4)
-    stat(s[0], "40%+", "Bauchi voters struggle with English INEC text")
-    stat(s[1], "5.1M+", "Registered voters in Bauchi")
-    stat(s[2], "20", "Local government areas")
-    stat(s[3], "Hausa · Fulfulde · English", "Text and voice")
+    stat(s[0], "40%+", tx("stat_40"))
+    stat(s[1], "5.1M+", tx("stat_51"))
+    stat(s[2], "20", tx("stat_20"))
+    stat(s[3], "Hausa · Fulfulde · English", tx("stat_lang"))
     st.write("")
     l, r = st.columns([3, 2])
     with l:
-        st.markdown("""<div class="card"><div class="sec">How it works</div>
-        <div class="step"><div class="no">1</div><div><b>Ask</b><span>Type or record a voice note in Hausa, Fulfulde or English.</span></div></div>
-        <div class="step"><div class="no">2</div><div><b>Understand</b><span>AI transcribes speech, matches it to verified FAQs and flags rumours or spam for review.</span></div></div>
-        <div class="step"><div class="no">3</div><div><b>Verify</b><span>A person reviews any AI draft against the INEC portal. AI never publishes by itself.</span></div></div>
-        <div class="step"><div class="no">4</div><div><b>Listen & share</b><span>Hear the answer read aloud, or share the verified answer on WhatsApp to counter fake news.</span></div></div>
-        </div>""", unsafe_allow_html=True)
+        steps = "".join(f'<div class="step"><div class="no">{i}</div><div><b>{tx("step%d_t" % i)}</b><span>{tx("step%d_d" % i)}</span></div></div>' for i in range(1, 5))
+        st.markdown(f'<div class="card"><div class="sec">{tx("how_title")}</div>{steps}</div>', unsafe_allow_html=True)
     with r:
-        st.markdown("""<div class="card"><div class="sec">Why it matters</div>
-        <p>Many Bauchi voters speak Hausa fluently but cannot comfortably read English INEC notices. Rumours about PVC
-        collection and election dates travel faster than official information. MURYA brings verified answers to people
-        in the language and format they can use — <b>spoken Hausa</b>.</p>
-        <p style="margin-top:8px;"><span class="chip ok">AI-assisted</span><span class="chip info">Human-approved</span>
-        <span class="chip wait">Privacy-first</span></p></div>""", unsafe_allow_html=True)
-    st.markdown('<div class="card"><div class="sec">Built by</div><b>Zaharaddeen Muhammad</b> — civic-tech builder, Bauchi, Nigeria.</div>', unsafe_allow_html=True)
+        st.markdown(f"""<div class="card"><div class="sec">{tx("why_title")}</div>
+        <p>{tx("why_p")}</p>
+        <p style="margin-top:8px;"><span class="chip ok">{tx("chip_ai")}</span><span class="chip info">{tx("chip_human")}</span>
+        <span class="chip wait">{tx("chip_priv")}</span></p></div>""", unsafe_allow_html=True)
+    st.markdown(f'<div class="card"><div class="sec">{tx("built_by")}</div><b>Zaharaddeen Muhammad</b> {tx("built_desc")}</div>', unsafe_allow_html=True)
 
 # =====================================================================
 # ASK
 # =====================================================================
 elif page == "Ask":
-    st.markdown("### 🎤 Ask MURYA")
+    st.markdown(tx("ask_title"))
     if not st.session_state.consent:
-        st.markdown(f"""<div class="card"><h3>Kafin ka fara · Before you start</h3>
-        <p>• Your question (text or voice) is stored so a person can answer it. <b>Do not share your PVC number, phone number or home address.</b><br>
-        • AI may transcribe your voice and suggest a draft; <b>a person approves every answer</b>.<br>
-        • You can delete everything you sent from this page at any time. Messages are also deleted automatically after {RETENTION_DAYS} days. Full details: the <b>Privacy</b> page. · Cikakken bayani yana shafin <b>Privacy</b>.<br>
-        • Only you and the MURYA reviewers can see your messages. Verified answers may be shown publicly <b>without</b> your identity.</p></div>""", unsafe_allow_html=True)
-        st.checkbox("Na fahimta kuma na yarda · I understand and agree", key="consent_cb", on_change=agree)
+        st.markdown(tx("consent_card", days=RETENTION_DAYS), unsafe_allow_html=True)
+        st.checkbox(tx("consent_cb"), key="consent_cb", on_change=agree)
     else:
         n = st.session_state.notice
         if n:
             (st.success if n[0] == "ok" else st.error if n[0] == "err" else st.warning)(n[1])
             st.session_state.notice = None
-        st.markdown('<div class="tip"><b>🎤 Ga wanda bai iya rubutu ba</b> — matsa mic ka yi magana kamar WhatsApp. · Tap the mic and speak.</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="tip">{tx("tip_mic")}</div>', unsafe_allow_html=True)
 
         # Replies are pulled, not pushed: check for a new answer every 20 s and refresh when one arrives.
         def _watch_replies():
@@ -962,144 +1284,145 @@ elif page == "Ask":
             if prev is not None and n_ans > prev: st.rerun()
         try: st.fragment(run_every=20)(_watch_replies)()
         except Exception: pass
-        st.button("🔄 Duba amsa · Check for replies")
+        st.button(tx("check_replies"))
 
         def send_text():
             q = st.session_state.q_box.strip()
             if not q: return
             if recent_count(SID) >= RATE_LIMIT_PER_HOUR:
-                st.session_state.notice = ("err", "Kun aika tambayoyi da yawa. Ku jira kadan. · Too many messages, please wait a while."); return
+                st.session_state.notice = ("err", tx("too_many")); return
             add_q(q, SID, st.session_state.lang_choice)
             st.session_state.q_box = ""
-            st.session_state.notice = ("ok", "✅ An aika! Za a duba a ba ka amsa. · Sent! A person will review it.")
+            st.session_state.notice = ("ok", tx("sent"))
 
         ct, cv = st.columns([2, 1])
         with ct:
             lang = st.session_state.lang_choice    # chosen with the language switch at the top of the page
-            st.caption(f"🌍 Harshe · Language: **{lang}** (canza a sama · change it at the top)")
-            ph = "Yaya zan duba PVC dina a Bauchi?" if lang != "English" else "How do I check my PVC status in Bauchi?"
+            st.caption(tx("lang_caption", lang=lang))
+            ph = tx("ph")
             st.text_area("Tambayarka", placeholder=ph, key="q_box", height=80, label_visibility="collapsed", max_chars=500)
-            st.button("🚀 Aika tambaya · Send", use_container_width=True, type="primary", on_click=send_text)
+            st.button(tx("send"), use_container_width=True, type="primary", on_click=send_text)
         with cv:
-            st.caption("🎤 Murya · Voice")
+            st.caption(tx("voice_cap"))
             vd = st.audio_input("Yi murya", key=f"murya_{st.session_state.voice_key}", label_visibility="collapsed")
             if vd is not None:
                 if recent_count(SID) >= RATE_LIMIT_PER_HOUR:
-                    st.error("Kun aika da yawa. Ku jira kadan.")
+                    st.error(tx("too_many_short"))
                 elif len(vd.getbuffer()) > 10 * 1024 * 1024:
-                    st.error("Muryar ta yi yawa - kasa da 10MB")
+                    st.error(tx("voice_big"))
                 else:
                     fname = f"Murya_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_{SID}.wav"
                     path = f"voice_notes/incoming/{fname}"
                     with open(path, "wb") as f: f.write(vd.getbuffer())
-                    with st.spinner("Ana rubuta muryarka..."):
+                    with st.spinner(tx("transcribing")):
                         text, status = transcribe(path, st.session_state.lang_choice) if stt_enabled() else ("", "off")
                     add_voice(fname, SID, text, st.session_state.lang_choice, status)
                     st.session_state.voice_key += 1
-                    st.session_state.notice = ("ok", "✅ Mun karbi muryarka! · Voice note received.")
+                    st.session_state.notice = ("ok", tx("voice_ok"))
                     st.rerun()
 
         # --- timeline ---
         items = [r for r in get_data() if IS_ADMIN or r["sid"] == SID]
         box = st.container(height=560, border=True)
         with box:
-            if not items: st.caption("Babu sakonni tukuna — ka fara tambaya a sama. · No messages yet.")
+            if not items: st.caption(tx("no_msgs"))
             for it in items[-40:]:
                 is_voice = it["kind"] == "voice"
                 chips = ""
                 if IS_ADMIN and it["flags"]: chips = "".join(f'<span class="chip risk">{esc(f)}</span>' for f in it["flags"].split(",") if f)
                 if is_voice:
-                    heard = (f'<div style="font-size:12px;color:#444;margin-top:4px;"><i>Abin da muka ji · We heard:</i> {esc(it["q"])}</div>'
-                             if it["q"] else '<div style="font-size:12px;color:#666;margin-top:4px;"><i>(Ba a rubuta muryar ba — mutum zai saurara · Not transcribed; a reviewer will listen)</i></div>')
-                    st.markdown(f'<div class="bu"><div class="who">🎤 Sakon murya {chips}</div>{heard}<div class="bm">{esc(it["created"])} ✓✓</div></div>', unsafe_allow_html=True)
+                    heard = (f'<div style="font-size:12px;color:#444;margin-top:4px;"><i>{tx("we_heard")}</i> {esc(it["q"])}</div>'
+                             if it["q"] else f'<div style="font-size:12px;color:#666;margin-top:4px;"><i>{tx("not_transcribed")}</i></div>')
+                    st.markdown(f'<div class="bu"><div class="who">{tx("voice_msg")} {chips}</div>{heard}<div class="bm">{esc(it["created"])} ✓✓</div></div>', unsafe_allow_html=True)
                     p = f"voice_notes/incoming/{it['audio']}"
                     if os.path.exists(p): st.audio(p)
                 else:
-                    st.markdown(f'<div class="bu"><div class="who">Kai · You {chips}</div>{esc(it["q"])}<div class="bm">{esc(it["created"])} ✓✓</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="bu"><div class="who">{tx("you")} {chips}</div>{esc(it["q"])}<div class="bm">{esc(it["created"])} ✓✓</div></div>', unsafe_allow_html=True)
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    share = (f"Q: {it['q']}" + (f" | A: {it['a']}" if it["a"].strip() else "")) if it["q"] else "Sakon murya"
-                    st.link_button("🔗 Share", wa_link(share))
+                    share = (f"Q: {it['q']}" + (f" | A: {it['a']}" if it["a"].strip() else "")) if it["q"] else tx("voice_msg_plain")
+                    st.link_button(tx("share"), wa_link(share))
                 if not is_voice:
                     with c2:
-                        if st.button("🔊 Sauti", key=f"sp_{it['id']}"): speak_auto(it["q"])
+                        if st.button(tx("sound"), key=f"sp_{it['id']}"): speak_auto(it["q"])
                 if IS_ADMIN:
                     with c3:
-                        if st.button("🗑️ Delete", key=f"del_{it['id']}"): delete_q(it["id"]); st.rerun()
+                        if st.button(tx("delete"), key=f"del_{it['id']}"): delete_q(it["id"]); st.rerun()
                 if it["a"].strip():
-                    st.markdown(f'<div class="ba"><div class="who">✅ MURYA · Amsa tabbatacciya</div>{esc(it["a"])}<div class="bm">An duba · Reviewed by a person</div></div>', unsafe_allow_html=True)
-                    if it["a"] != VOICE_REPLY_TEXT and st.button("🔊 Saurari amsa", key=f"spa_{it['id']}", use_container_width=True): speak_auto(it["a"])
+                    st.markdown(f'<div class="ba"><div class="who">{tx("ans_head")}</div>{esc(it["a"])}<div class="bm">{tx("reviewed_person")}</div></div>', unsafe_allow_html=True)
+                    if it["a"] != VOICE_REPLY_TEXT and st.button(tx("listen_answer"), key=f"spa_{it['id']}", use_container_width=True): speak_auto(it["a"])
                     rp = reply_path(it)
                     if os.path.exists(rp):
-                        st.markdown('<div class="ba">🎙️ Amsar murya</div>', unsafe_allow_html=True); st.audio(rp)
+                        st.markdown(f'<div class="ba">{tx("voice_ans")}</div>', unsafe_allow_html=True); st.audio(rp)
                     if it.get("helpful"):
-                        st.caption("🙏 Na gode! · Thank you for your feedback.")
+                        st.caption(tx("thanks"))
                     else:
                         hc = st.columns([1, 1, 3])
                         with hc[0]:
-                            if st.button("👍 Ya taimaka", key=f"hy_{it['id']}"): set_helpful(it["id"], "yes"); st.rerun()
+                            if st.button(tx("helpful_yes"), key=f"hy_{it['id']}"): set_helpful(it["id"], "yes"); st.rerun()
                         with hc[1]:
-                            if st.button("👎 Bai taimaka ba", key=f"hn_{it['id']}"): set_helpful(it["id"], "no"); st.rerun()
+                            if st.button(tx("helpful_no"), key=f"hn_{it['id']}"): set_helpful(it["id"], "no"); st.rerun()
                 else:
-                    st.markdown('<span class="chip wait">⏳ Ana jiran amsa daga mutum · Awaiting human review</span>', unsafe_allow_html=True)
+                    st.markdown(f'<span class="chip wait">{tx("awaiting")}</span>', unsafe_allow_html=True)
                     if it["q"]:
                         m, sc = kb_match(it["q"], KB)
                         if m:
                             prov = PROVISIONAL in m["a"]
-                            body, ffnote = pick_answer(m, it.get("lang") or "Hausa")
+                            body, ffnote = pick_answer(m, st.session_state.get("lang_choice", "Hausa"))
                             if prov:
                                 st.markdown(
-                                    '<div class="bf prov"><b>⏳ Bayani na farko · Preliminary info</b><br>'
-                                    f'{esc(body)}{esc(ffnote)}<br>'
-                                    '<span class="chip wait">Ana jiran tabbatarwa daga mutum · Awaiting human confirmation</span><br>'
-                                    f'<span style="font-size:10.5px;color:#557;">Source: {esc(m.get("source",""))}</span></div>',
+                                    f'<div class="bf prov"><b>{tx("prelim")}</b><br>'
+                                    f'{esc(body)}{esc(loc_note(ffnote))}<br>'
+                                    f'<span class="chip wait">{tx("awaiting_conf")}</span><br>'
+                                    f'<span style="font-size:10.5px;color:#557;">{tx("source")}: {esc(m.get("source",""))}</span></div>',
                                     unsafe_allow_html=True)
                             else:
                                 st.markdown(
-                                    f'<div class="bf"><b>📌 Tabbataccen bayani mai alaƙa · Related verified FAQ</b><br>{esc(body)}{esc(ffnote)}<br>'
-                                    f'<span style="font-size:10.5px;color:#557;">Source: {esc(m.get("source",""))} · reviewed {esc(m.get("reviewed",""))}</span></div>',
+                                    f'<div class="bf"><b>{tx("related_verified")}</b><br>{esc(body)}{esc(loc_note(ffnote))}<br>'
+                                    f'<span style="font-size:10.5px;color:#557;">{tx("source")}: {esc(m.get("source",""))} · {tx("reviewed_word")} {esc(m.get("reviewed",""))}</span></div>',
                                     unsafe_allow_html=True)
-                            if st.button("🔊 Saurari", key=f"spf_{it['id']}"):
+                            if st.button(tx("listen_short"), key=f"spf_{it['id']}"):
                                 lga = lga_hit(it["q"])
-                                if (it.get("lang") or "Hausa") == "English": speak_auto(body)
-                                elif lga: speak_lga(lga, m["a"], it.get("lang") or "Hausa")
-                                elif m.get("id"): speak_kb(m, m["a"], it.get("lang") or "Hausa")
+                                if (st.session_state.get("lang_choice", "Hausa")) == "English": speak_auto(body)
+                                elif lga: speak_lga(lga, m["a"], st.session_state.get("lang_choice", "Hausa"))
+                                elif m.get("id"): speak_kb(m, m["a"], st.session_state.get("lang_choice", "Hausa"))
                                 else: speak_auto(m["a"])
         st.write("")
-        if st.button("🧹 Goge sakonni na duka · Delete all my messages"):
-            k = delete_sid(SID); st.session_state.notice = ("ok", f"An goge sakonni {k}. · {k} message(s) deleted."); st.rerun()
+        if st.button(tx("delete_all")):
+            k = delete_sid(SID); st.session_state.notice = ("ok", tx("deleted", k=k)); st.rerun()
 
 # =====================================================================
 # VERIFIED INFO
 # =====================================================================
 elif page == "Verified Info":
-    st.markdown("### ✅ Bayanan INEC tabbatattu · Verified INEC information")
-    st.markdown('<div class="tip">Every item in the list below was written or approved by a person and checked against official INEC sources. Nothing here is AI-generated.</div>', unsafe_allow_html=True)
+    st.markdown(f"### {tx('vi_title')}")
+    st.markdown(f'<div class="tip">{tx("vi_tip")}</div>', unsafe_allow_html=True)
 
     # Tap-to-pick: for people who cannot type or read well.
-    st.markdown("#### 📍 Ina ofishin INEC na karamar hukumar ka?")
-    info_lang = st.session_state.lang_choice    # chosen with the language switch at the top of the page
-    pick = st.selectbox("Zaɓi karamar hukuma · Choose your LGA", ["—"] + list(LGA_OFFICES), key="lga_pick")
+    st.markdown(tx("vi_office_h"))
+    info_lang = st.session_state.get("lang_choice", "Hausa")    # chosen with the language switch at the top of the page
+    pick = st.selectbox(tx("vi_choose_lga"), ["—"] + list(LGA_OFFICES), key="lga_pick")
     if pick != "—":
         k = next((k for k in KB if k["q"] == lga_qa(pick)[0]), None)
         confirmed = bool(k and k.get("reviewed"))
         body, ffnote = pick_answer(k if k else {"a": lga_qa(pick)[1]}, info_lang)
-        txt = body + ffnote + ("" if confirmed else PROVISIONAL)
+        txt = body + loc_note(ffnote) + ("" if confirmed else " ⏳ " + tx("awaiting_conf") + ".")
         cls = "bf" if confirmed else "bf prov"
         st.markdown(f'<div class="{cls}">{esc(txt)}</div>', unsafe_allow_html=True)
         speak_lga(pick, txt if info_lang == "English" else (k["a"] if k else lga_qa(pick)[1]), info_lang)
 
-    st.markdown("#### Tambayoyi da amsoshi · FAQs")
+    st.markdown(tx("vi_faq_h"))
     VERIFIED = [k for k in KB if k.get("reviewed")]
     for i, k in enumerate(VERIFIED):
-        st.markdown(f'<div class="card"><h3>Q{i+1}: {esc(pick_question(k, info_lang))}</h3><p style="color:#0b5d2e;font-weight:600;">{esc(pick_answer(k, info_lang)[0])}{esc(pick_answer(k, info_lang)[1])}</p>'
-                    f'<span class="chip info">Source: {esc(k.get("source",""))}</span><span class="chip ok">Reviewed {esc(k.get("reviewed",""))}</span></div>', unsafe_allow_html=True)
+        ans_txt, ans_note = pick_answer(k, info_lang)
+        st.markdown(f'<div class="card"><h3>Q{i+1}: {esc(pick_question(k, info_lang))}</h3><p style="color:#0b5d2e;font-weight:600;">{esc(ans_txt)}{esc(loc_note(ans_note))}</p>'
+                    f'<span class="chip info">{tx("source")}: {esc(k.get("source",""))}</span><span class="chip ok">{tx("reviewed_cap")} {esc(k.get("reviewed",""))}</span></div>', unsafe_allow_html=True)
         cc = st.columns([1, 1, 4])
         with cc[0]:
-            if st.button("🔊 Sauti", key=f"faq_{k['id']}"):
+            if st.button(tx("sound"), key=f"faq_{k['id']}"):
                 if info_lang == "English": speak_auto(pick_answer(k, "English")[0])
                 else: speak_kb(k, k["a"], info_lang)
-        with cc[1]: st.link_button("🔗 Share", wa_link(f"Q: {k['q']} | A: {k['a']}"))
+        with cc[1]: st.link_button(tx("share"), wa_link(f"Q: {k['q']} | A: {k['a']}"))
 
 # =====================================================================
 # DASHBOARD
@@ -1109,54 +1432,54 @@ elif page == "Dashboard":
     df = pd.DataFrame(data) if data else pd.DataFrame(columns=["a", "kind", "created", "q"])
     ans = int((df["a"].astype(str).str.strip() != "").sum()) if len(df) else 0
     voice = int((df["kind"] == "voice").sum()) if len(df) else 0
-    st.markdown("### 📊 Impact dashboard")
-    st.caption("Aggregate figures only. Private messages are never shown here.")
+    st.markdown(tx("dash_title"))
+    st.caption(tx("dash_caption"))
     s = st.columns(4)
-    stat(s[0], len(df), "Total questions"); stat(s[1], ans, "Answered & verified")
-    stat(s[2], len(df) - ans, "Awaiting review"); stat(s[3], voice, "Voice notes")
+    stat(s[0], len(df), tx("dash_total")); stat(s[1], ans, tx("dash_answered"))
+    stat(s[2], len(df) - ans, tx("dash_waiting")); stat(s[3], voice, tx("dash_voice"))
     rated = [r for r in data if r.get("helpful")]
     if rated:
         yes = sum(1 for r in rated if r["helpful"] == "yes")
-        st.caption(f"👍 {round(100 * yes / len(rated))}% of {len(rated)} rated answers were found helpful")
+        st.caption(tx("dash_rated", pct=round(100 * yes / len(rated)), n=len(rated)))
     if IS_ADMIN: st.markdown('<div style="margin:10px 0;"><span class="admin-on">🔐 ADMIN MODE</span></div>', unsafe_allow_html=True)
     st.write("")
     if len(df) == 0:
-        st.info("Babu data tukuna. · No data yet — questions will appear here as aggregates.")
+        st.info(tx("dash_nodata"))
     else:
         l, r = st.columns(2)
         with l:
-            st.markdown('<div class="card"><div class="sec">Questions per day</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="card"><div class="sec">{tx("dash_perday")}</div>', unsafe_allow_html=True)
             d = df.assign(day=df["created"].astype(str).str[:10]).groupby("day").size()
             st.bar_chart(d); st.markdown('</div>', unsafe_allow_html=True)
         with r:
-            st.markdown('<div class="card"><div class="sec">Text vs voice</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="card"><div class="sec">{tx("dash_textvoice")}</div>', unsafe_allow_html=True)
             st.bar_chart(df["kind"].value_counts()); st.markdown('</div>', unsafe_allow_html=True)
         topics = {}
         for _, row in df.iterrows():
             if not row["q"]: continue
             m, _s = kb_match(row["q"], KB)
             if not m:
-                key = "Other / unmatched"
+                key = tx("dash_other")
             elif m.get("source") == LGA_SRC:
-                key = "Office locations"
+                key = tx("dash_office")
             else:
                 idx = next((i for i, k in enumerate(KB) if k.get("q") == m.get("q")), None)
-                key = f"FAQ {idx+1}" if idx is not None else "Other / unmatched"
+                key = f"FAQ {idx+1}" if idx is not None else tx("dash_other")
             topics[key] = topics.get(key, 0) + 1
         if topics:
-            st.markdown('<div class="card"><div class="sec">What citizens ask about</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="card"><div class="sec">{tx("dash_about")}</div>', unsafe_allow_html=True)
             st.bar_chart(pd.Series(topics)); st.markdown('</div>', unsafe_allow_html=True)
         barriers = {}
         for _, row in df.iterrows():
-            for t in barrier_tags(str(row["q"] or "")): barriers[t] = barriers.get(t, 0) + 1
+            for tag_ in barrier_tags(str(row["q"] or "")): barriers[tag_] = barriers.get(tag_, 0) + 1
         if barriers:
-            st.markdown('<div class="card"><div class="sec">Weather & access barriers people mention</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="card"><div class="sec">{tx("dash_barriers")}</div>', unsafe_allow_html=True)
             st.bar_chart(pd.Series(barriers))
-            st.caption("Aggregate counts from the words people used. No names, no messages shown.")
+            st.caption(tx("dash_barriers_cap"))
             st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown('<div class="sec">Latest verified answers (public)</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="sec">{tx("dash_latest")}</div>', unsafe_allow_html=True)
         pub = [r for r in data if r["a"].strip() and r["kind"] == "text"][-5:]
-        if not pub: st.caption("No public answers yet.")
+        if not pub: st.caption(tx("dash_nopublic"))
         for r in pub:
             st.markdown(f'<div class="bu">{esc(r["q"])}</div><div class="ba"><div class="who">✅ MURYA</div>{esc(r["a"])}</div>', unsafe_allow_html=True)
 
@@ -1164,50 +1487,53 @@ elif page == "Dashboard":
 # RESPONSIBLE AI
 # =====================================================================
 elif page == "Responsible AI":
-    st.markdown("### 🛡️ Responsible AI, privacy & limitations")
+    st.markdown(tx("ra_title"))
     a, b = st.columns(2)
     with a:
-        st.markdown("""<div class="card"><h3>Where AI is used</h3><ul>
-        <li><b>Speech-to-text</b> turns Hausa/English voice notes into text (when enabled).</li>
-        <li><b>Retrieval</b> matches a question to human-verified FAQs. Nothing is generated.</li>
-        <li><b>Draft assistant</b> proposes a reply using <i>only</i> the confirmed fact base. It must say "not grounded" when facts do not cover the question.</li>
-        <li><b>Risk flags</b> highlight links, vote-buying offers, rumours, phone numbers and partisan content for reviewers.</li></ul></div>""", unsafe_allow_html=True)
-        st.markdown("""<div class="card"><h3>What AI never does</h3><ul>
-        <li>Publish an answer on its own. A person approves every answer.</li>
-        <li>Express views on parties, candidates or results.</li>
-        <li>Use real voter registers or confidential INEC systems.</li>
-        <li>Target or persuade voters.</li></ul></div>""", unsafe_allow_html=True)
-        st.markdown("""<div class="card"><h3>Inclusion by design</h3><ul>
-        <li>Hausa first, English alongside. Voice in, voice out.</li>
-        <li>Tap-to-pick LGA list for people who cannot type or read well.</li>
-        <li>Office locations from INEC's directory are always shown as <b>"awaiting human confirmation"</b> until a person confirms them.</li></ul></div>""", unsafe_allow_html=True)
+        st.markdown(tx("ra_ai"), unsafe_allow_html=True)
+        st.markdown(tx("ra_never"), unsafe_allow_html=True)
+        st.markdown(tx("ra_incl"), unsafe_allow_html=True)
     with b:
-        st.markdown("""<div class="card"><h3>Privacy by design</h3><ul>
-        <li>Explicit consent before any message is stored.</li>
-        <li>Users see only their own messages and can delete them in one tap.</li>
-        <li>No names, PVC numbers or phone numbers are requested.</li>
-        <li>Admin-controlled retention: old messages and audio can be purged by age.</li>
-        <li>Public pages show aggregates and approved answers only.</li>
-        <li>Admin access uses a salted, hashed password with login lockout.</li></ul></div>""", unsafe_allow_html=True)
-        st.markdown("""<div class="card"><h3>Honest limitations</h3><ul>
-        <li>Hausa speech recognition is less accurate than English; a reviewer can always play the original audio.</li>
-        <li>Fulfulde answers appear only after a native speaker confirms them. There is no Fulfulde speech-to-text or synthetic voice yet, so Fulfulde voice notes go straight to a human listener.</li>
-        <li>Synthetic text-to-speech has no native Hausa voice, so Hausa answers use human-recorded clips where available.</li>
-        <li>The verified fact base is small and manually maintained.</li>
-        <li>One reviewer is a bottleneck. Scaling needs trained volunteers and shift rosters.</li>
-        <li>Free hosting may erase stored data on restart; a managed database is needed for production.</li>
-        <li>No offline mode yet. Languages beyond Hausa and English are future work.</li></ul></div>""", unsafe_allow_html=True)
+        st.markdown(tx("ra_priv"), unsafe_allow_html=True)
+        st.markdown(tx("ra_lim"), unsafe_allow_html=True)
     rows, hit, frows, fhit = run_eval(KB)
-    st.markdown(f'<div class="card"><h3>Live self-test (runs on the current verified FAQs)</h3>'
-                f'<p>FAQ retrieval: <b>{hit}/{len(EVAL_QA)}</b> correct · Risk flags: <b>{fhit}/{len(EVAL_FLAGS)}</b> correct. '
-                f'Hand-written by the developer, and partly used to tune the matcher: a sanity check, not a benchmark. Accuracy with real users is measured in the pilot.</p></div>', unsafe_allow_html=True)
-    with st.expander("See test details"):
+    st.markdown(tx("ra_selftest", hit=hit, n=len(EVAL_QA), fhit=fhit, fn=len(EVAL_FLAGS)), unsafe_allow_html=True)
+    with st.expander(tx("ra_details")):
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         st.dataframe(pd.DataFrame(frows), use_container_width=True, hide_index=True)
 
 # =====================================================================
 # PRIVACY
 # =====================================================================
+elif page == "Polling Units":
+    st.markdown(tx("pu_title"))
+    n_pu = pu_count()
+    st.markdown(f'<div class="tip">{tx("pu_tip")}</div>', unsafe_allow_html=True)
+    if not n_pu:
+        st.info(tx("pu_none"))
+        if IS_ADMIN: st.caption("Admin: import the INEC file in Admin > Polling units.")
+    else:
+        asof, src_pu, conf_pu = pu_meta("asof") or "n/a", pu_meta("source") or "INEC", pu_meta("confirmed") == "1"
+        banner = tx("pu_conf" if conf_pu else "pu_prov", src=esc(src_pu), asof=esc(asof))
+        st.markdown(f'<div class="{"bf" if conf_pu else "bf prov"}">{banner}</div>', unsafe_allow_html=True)
+        mode = st.radio(tx("pu_mode"), ["ward", "code"], horizontal=True, key="pu_mode2", format_func=lambda v: tx("pu_mode_" + v))
+        def _show(units):
+            if not units:
+                st.caption(tx("pu_nothing")); return
+            st.caption(tx("pu_count", n=len(units)))
+            for u in units[:60]:
+                st.markdown(f'<div class="bf"><b>{esc(u["pu_name"])}</b><br>{esc(u["pu_code"] or "—")} · {esc(u["ward"])} · {esc(u["lga"])}</div>', unsafe_allow_html=True)
+            if len(units) > 60: st.caption(tx("pu_first60"))
+        if mode == "ward":
+            lga_sel = st.selectbox(tx("pu_lga"), ["—"] + pu_lgas(), key="pu_lga")
+            if lga_sel != "—":
+                ward_sel = st.selectbox(tx("pu_ward"), ["—"] + pu_wards(lga_sel), key="pu_ward")
+                if ward_sel != "—": _show(pu_units(lga_sel, ward_sel))
+        else:
+            q_pu = st.text_input(tx("pu_q"), key="pu_q", placeholder="05/01/02/001")
+            if q_pu.strip():
+                _show(pu_search(q_pu))
+
 elif page == "Learn":
     st.markdown("### 🛡️ Koyon gane saƙon ƙarya · Spot fake election messages")
     st.markdown('<div class="tip">Taƙaitaccen darasi · A short lesson. These are general tips to protect you from rumours and scams. '
@@ -1235,6 +1561,7 @@ elif page == "Privacy":
         <p><b>Wanda ke gani:</b> kai da masu duba MURYA kaɗai. Shafukan jama'a suna nuna amsoshin da aka amince da su ne kawai, ba tare da bayananka ba.</p>
         <p><b>Hidimomin waje:</b> idan ka danna 🔊 a kan tambayarka, ana aika rubutun zuwa sabis ɗin karatun sauti na Google. Idan an kunna rubuta murya, ana aika muryarka zuwa OpenAI don maida ta rubutu (ba ya aiki ga Fulfulde). Idan an kunna taimakon AI, ana aika rubutun tambayar zuwa kamfanin AI don rubuta amsar da mutum zai duba.</p>
         <p><b>Tsawon ajiya:</b> ana goge saƙonni ta atomatik bayan kwana {RETENTION_DAYS}. Kana iya goge naka a kowane lokaci da danna ɗaya a shafin Ask.</p>
+        <p><b>Neman rumfar zabe:</b> ba a ajiye abin da ka nema. Ba ma tambayar lambar PVC ko lambar waya.</p>
         <p><b>Kada ka raba:</b> lambar PVC, lambar waya ko adireshin gida.</p>
         <p><b>Doka:</b> MURYA tana bin ƙa'idojin Dokar Kare Bayanai ta Najeriya ta 2023 (yarda, tara abin da ake buƙata kawai, manufa ɗaya, gogewa da tsaro). Wannan samfurin gwaji ne kuma lauya bai duba shi ba tukuna.</p></div>""", unsafe_allow_html=True)
     with en:
@@ -1244,6 +1571,7 @@ elif page == "Privacy":
         <p><b>Who sees it:</b> you and the MURYA reviewers only. Public pages show approved answers without your details.</p>
         <p><b>Outside services:</b> if you tap 🔊 on your own question, that text is sent to Google's text-to-speech service. If speech-to-text is switched on, your recording is sent to OpenAI to turn it into text (not available for Fulfulde). If AI drafting is switched on, the question text is sent to an AI provider to draft a reply that a person then checks.</p>
         <p><b>How long we keep it:</b> messages are deleted automatically after {RETENTION_DAYS} days. You can delete yours at any time with one tap on the Ask page.</p>
+        <p><b>Polling-unit search:</b> what you search for is not saved. We do not ask for your PVC or phone number.</p>
         <p><b>Please do not share:</b> your PVC number, phone number or home address.</p>
         <p><b>The law:</b> MURYA follows the principles of Nigeria's Data Protection Act 2023 (consent, collecting only what is needed, one clear purpose, deletion and security). This is a prototype and has not yet had a legal review.</p></div>""", unsafe_allow_html=True)
 
@@ -1262,7 +1590,7 @@ elif page == "Admin":
                         f'<span class="chip {"ok" if ai_enabled() else "wait"}">AI drafts: {"on" if ai_enabled() else "off"}</span>'
                         f'<span class="chip {"ok" if stt_enabled() else "wait"}">Speech-to-text: {"on" if stt_enabled() else "off"}</span>', unsafe_allow_html=True)
         with top[1]: st.button("Logout", on_click=logout, use_container_width=True)
-        t1, t2, t3, t4, t5, t6 = st.tabs(["📥 Queue", "✅ Published", "📚 Fact base", "🧪 Evaluation", "🗄️ Data & privacy", "🎙️ Voice clips"])
+        t1, t2, t3, t4, t5, t6, t7, t8 = st.tabs(["📥 Queue", "✅ Published", "📚 Fact base", "🧪 Evaluation", "🗄️ Data & privacy", "🎙️ Voice clips", "📍 Polling units", "🌍 Languages"])
         rows = get_data()
 
         def gen_draft(qid):
@@ -1453,20 +1781,82 @@ elif page == "Admin":
                     for fn in files: z.write(f"voice_audio/{fn}", fn)
                 st.download_button(f"⬇️ Download all {len(files)} clip(s) (ZIP)", buf.getvalue(), "voice_audio.zip", "application/zip")
 
+        with t7:
+            st.caption("Import the polling-unit list you get from INEC (CSV or Excel with LGA, ward, polling unit code and name). "
+                       "Use only data INEC has authorised. No voter names or PVC numbers. Importing replaces the current list.")
+            n_pu = pu_count()
+            if n_pu:
+                st.success(f"{n_pu} polling units loaded · list as of {pu_meta('asof') or 'date not set'} · source: {pu_meta('source') or 'n/a'} · "
+                           + ("CONFIRMED by INEC" if pu_meta("confirmed") == "1" else "awaiting INEC confirmation"))
+            else:
+                st.info("No list loaded yet.")
+            st.download_button("⬇️ Download the CSV template", "lga,ward,pu_code,pu_name\nEXAMPLE LGA,EXAMPLE WARD,00/00/00/000,EXAMPLE POLLING UNIT (delete this row)\n",
+                               "polling_units_template.csv", "text/csv")
+            up_pu = st.file_uploader("Upload the INEC list", type=["csv", "xlsx"], key="pu_upload")
+            asof_in = st.text_input("List as of (date)", value=pu_meta("asof"), key="pu_asof_in")
+            src_in = st.text_input("Source", value=pu_meta("source") or "INEC Bauchi State Office", key="pu_src_in")
+            perm = st.checkbox("I have INEC's written permission to use this list", key="pu_perm")
+            if up_pu is not None and st.button("⬆️ Import (replaces the current list)", key="pu_import"):
+                if not perm: st.warning("Tick the permission box first.")
+                else:
+                    try:
+                        rows_pu, mapping, skipped = pu_parse(pu_read_upload(up_pu))
+                    except Exception as e:
+                        rows_pu, mapping, skipped = [], {}, 0; st.error(f"Could not read that file ({type(e).__name__}). For Excel, try saving it as CSV.")
+                    if rows_pu:
+                        pu_replace(rows_pu); pu_set_meta("asof", asof_in.strip()); pu_set_meta("source", src_in.strip()); pu_set_meta("confirmed", "0")
+                        st.success(f"Imported {len(rows_pu)} polling units ({skipped} rows skipped). Columns used: {mapping}"); st.rerun()
+                    elif mapping:
+                        st.error(f"Could not find LGA, ward and name/code columns. I saw: {mapping}. Rename the headings to lga, ward, pu_code, pu_name.")
+            conf_in = st.checkbox("INEC has confirmed that this list is correct", value=pu_meta("confirmed") == "1", key="pu_conf_in")
+            c_pu = st.columns(2)
+            with c_pu[0]:
+                if st.button("💾 Save date, source and confirmation", key="pu_save_meta"):
+                    pu_set_meta("asof", asof_in.strip()); pu_set_meta("source", src_in.strip()); pu_set_meta("confirmed", "1" if conf_in else "0"); st.rerun()
+            with c_pu[1]:
+                if n_pu and st.button("🗑️ Delete the whole list", key="pu_clear"): pu_clear(); st.rerun()
+            if n_pu:
+                with _conn() as c_prev:
+                    st.dataframe(pd.DataFrame(rows_to_dicts(c_prev.execute("SELECT lga,ward,pu_code,pu_name FROM polling_units LIMIT 20"))),
+                                 use_container_width=True, hide_index=True)
+
+
+        with t8:
+            st.caption("Hausa and English are the reference texts for the whole app (Privacy and Learn always show both; Admin stays in English). "
+                       "The Fulfulde interface is a DRAFT: citizens see Hausa for any text without an approved Fulfulde version. "
+                       "Download the texts, have a native Fulfulde speaker correct the 'fulfulde' column, upload it, then press 'Mark as reviewed'. "
+                       "Admins always see the draft.")
+            if kv_get("ff_ui_live") == "1": st.success("✅ Fulfulde interface is LIVE for citizens (reviewer: " + (kv_get("ff_ui_reviewer") or "n/a") + ").")
+            else: st.warning("⏳ Fulfulde interface is NOT live. Citizens who pick Fulfulde see Hausa.")
+            ui_rows = [{"key": k_, "hausa": v_[0], "english": v_[1], "fulfulde": UI_FF_OVR.get(k_) or (v_[2] or "")} for k_, v_ in UI.items()]
+            st.download_button("⬇️ Download all interface texts (CSV)", pd.DataFrame(ui_rows).to_csv(index=False), "murya_interface_texts.csv", "text/csv")
+            up_ui = st.file_uploader("Upload the reviewed CSV (needs the columns key and fulfulde)", type=["csv"], key="ui_ff_upload")
+            if up_ui is not None and st.button("⬆️ Save Fulfulde corrections", key="ui_ff_save"):
+                try:
+                    df_ui = pd.read_csv(up_ui, dtype=str).fillna("")
+                    ovr = {r_["key"]: r_["fulfulde"].strip() for _, r_ in df_ui.iterrows() if r_.get("key") in UI and str(r_.get("fulfulde", "")).strip()}
+                    kv_set("ff_ui_overrides", json.dumps(ovr, ensure_ascii=False)); kv_set("ff_ui_live", "0")
+                    st.success(f"Saved {len(ovr)} Fulfulde text(s). Fulfulde is offline until you mark it reviewed again."); st.rerun()
+                except Exception as e_:
+                    st.error(f"Could not read that CSV ({type(e_).__name__}). Keep the columns key and fulfulde.")
+            rev_ui = st.text_input("Reviewer name", value=kv_get("ff_ui_reviewer"), key="ui_ff_rev")
+            cu = st.columns(2)
+            with cu[0]:
+                if st.button("✅ Mark as reviewed (go live)", key="ui_ff_live"):
+                    if rev_ui.strip(): kv_set("ff_ui_reviewer", rev_ui.strip()); kv_set("ff_ui_live", "1"); st.rerun()
+                    else: st.warning("Enter the reviewer's name first.")
+            with cu[1]:
+                if st.button("⏸️ Take offline", key="ui_ff_off"): kv_set("ff_ui_live", "0"); st.rerun()
+
 # =====================================================================
 # CONTACT
 # =====================================================================
 elif page == "Contact":
-    st.markdown("""<div class="card"><h3>📞 Contact</h3>
-    <p><b>MURYA — Muryar Zabe</b><br>Inclusive & Multilingual Electoral/Civic Technology · Bauchi, Nigeria<br><br>
-    Built by <b>Zaharaddeen Muhammad</b> for the AI4Elections Hackathon 2026–2027.<br><br>
-    To reach the team, use the <b>Ask</b> page. A person reads every message.<br><br>
-    <i>MURYA is an independent civic-tech project. It is not affiliated with, or endorsed by, INEC. Always confirm critical
-    information on <b>inec.gov.ng</b> or at your local INEC office.</i></p></div>""", unsafe_allow_html=True)
+    st.markdown(tx("contact_card"), unsafe_allow_html=True)
 
 st.markdown(f"""
-<div class="foot"><div class="partners">{inec_logo_html(28)}<span>Bayanan INEC · Official source: inec.gov.ng</span></div>
+<div class="foot"><div class="partners">{inec_logo_html(28)}<span>{tx("foot_src")}</span></div>
 <b>🎙️ MURYA — Muryar Zabe</b><br>
-Independent civic-tech project · Not an official INEC product · AI-assisted, human-approved<br>
-Built by Zaharaddeen Muhammad · Bauchi, Nigeria · AI4Elections Hackathon 2026–2027</div>
+{tx("foot_l1")}<br>
+{tx("foot_l2")}</div>
 """, unsafe_allow_html=True)
