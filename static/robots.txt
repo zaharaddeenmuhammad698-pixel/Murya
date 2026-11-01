@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://murya-engrdeeno.streamlit.app/sitemap.xml
