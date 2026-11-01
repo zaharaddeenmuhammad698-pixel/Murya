@@ -1,0 +1,18 @@
+# MURYA
+
+> MURYA is a verified INEC civic information platform for Bauchi State. Provides trusted information in Hausa, Fulfulde and English. Features voice reporting, LGA INEC offices verification, and citizen engagement.
+
+## What is MURYA
+- Name: MURYA means VOICE in Hausa
+- Purpose: Connect citizens to verified INEC services and civic info
+- Languages: Hausa, Fulfulde, English
+- Coverage: All 20 LGAs of Bauchi State
+
+## Features
+- Voice Reporting (Hausa Voice)
+- Verified INEC Information (Shield check)
+- Voting & Civic Engagement
+- LGA offices-based verification
+
+## Official Site
+https://murya-engrdeeno.streamlit.app
