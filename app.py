@@ -132,6 +132,9 @@ html{scroll-behavior:smooth;}
 .stButton>button[kind="primary"]:hover{background:var(--g700);color:#fff;}
 button:focus-visible, input:focus-visible, textarea:focus-visible, [role="radio"]:focus-visible{outline:3px solid var(--gold) !important;outline-offset:2px;}
 .stat .n{font-size:26px;}
+/* contrast fixes (WCAG AA): small grey text darkened to at least 7:1 */
+.bm{color:#3f5247 !important;}
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] *{color:#3f5247 !important;opacity:1 !important;}
 @media (max-width:900px){.hero-mark{width:100px;height:100px;right:18px;top:18px;}}
 @media (max-width:640px){
   .hero{padding:26px 18px 18px;min-height:0;}

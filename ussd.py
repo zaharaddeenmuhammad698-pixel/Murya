@@ -259,21 +259,70 @@ def ussd(token=""):
 _fails = {}   # per-worker memory: wrong dashboard logins per address
 def _client(): return (request.headers.get("X-Forwarded-For", request.remote_addr or "") or "").split(",")[0].strip()
 
+from flask import redirect
+
+SESSION_HOURS = 12
+_H = (ADMIN_PASSWORD_HASH or "").strip().strip('"').strip("'").strip()   # ignore quote marks pasted around the hash
+
+def _hash_problem():
+    """A plain-English hint when ADMIN_PASSWORD_HASH was pasted wrongly (never shows the value itself)."""
+    if not _H:
+        return "ADMIN_PASSWORD_HASH is not set in the Environment page (check the spelling of the name, then redeploy)."
+    if any(c in _H for c in " \t\r\n") or not _H.startswith(("scrypt:", "pbkdf2:")) or _H.count("$") != 2:
+        return ("ADMIN_PASSWORD_HASH looks damaged. It must be ONE line that starts with scrypt: or pbkdf2:, with no spaces. "
+                "Make it again with make_ussd_secrets.py and paste the whole value after the = sign.")
+    return ""
+
+LOGIN_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MURYA sign in</title><style>body{font-family:Arial,sans-serif;background:#f5f5f5;padding:16px;color:#14261b}
+.card{max-width:420px;margin:30px auto;background:#fff;padding:22px;border-radius:14px}h1{color:#0a7e07;font-size:22px;margin-top:0}
+label{display:block;margin:12px 0 4px;font-weight:bold}input{width:100%;padding:12px;font-size:16px;border:1px solid #888;border-radius:8px;box-sizing:border-box}
+.btn{margin-top:16px;width:100%;background:#0a7e07;color:#fff;padding:13px;font-size:16px;border:none;border-radius:10px;cursor:pointer}
+.err{background:#fee2e2;color:#991b1b;padding:10px;border-radius:8px;margin:10px 0}.warn{background:#fef3c7;color:#92400e;padding:10px;border-radius:8px;margin:10px 0}</style></head>
+<body><div class="card"><h1>MURYA reports: sign in</h1>
+{% if problem %}<div class="warn">{{ problem }}</div>{% endif %}
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<form method="post" action="/login"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label for="u">User name</label><input id="u" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" required>
+<label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password" required>
+<button class="btn" type="submit">Sign in</button></form></div></body></html>"""
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    problem, error = _hash_problem(), ""
+    if request.method == "POST":
+        who, t = _client(), time.time()
+        _fails[who] = [x for x in _fails.get(who, []) if t - x < 300]
+        if not hmac.compare_digest(request.form.get("csrf", ""), session.get("csrf", "x")):
+            error = "Your browser did not keep the sign-in cookie. Allow cookies for this site, open the page again, and retry."
+        elif len(_fails[who]) >= 8:
+            error = "Too many wrong attempts. Try again in 5 minutes."
+        elif problem:
+            error = "The password setting on the server is not correct (see the yellow note)."
+        else:
+            u, p = request.form.get("username", "").strip().lower(), request.form.get("password", "")
+            user_ok = hmac.compare_digest(u.encode(), ADMIN_USER.strip().lower().encode())
+            pass_ok = check_password_hash(_H, p) or (p != p.strip() and check_password_hash(_H, p.strip()))
+            if user_ok and pass_ok:
+                session.clear(); session["admin"] = True; session["t"] = t
+                return redirect("/dashboard")
+            _fails[who].append(t)
+            error = "Wrong user name or password. The user name is " + ("the ADMIN_USER value in your Environment page." if os.environ.get("ADMIN_USER") else "admin.")
+    return render_template_string(LOGIN_PAGE, problem=problem, error=error, csrf=csrf_token())
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect("/login")
+
 def require_admin(f):
     @wraps(f)
     def wrapper(*a, **k):
-        if not ADMIN_PASSWORD_HASH:
-            return Response("Dashboard is off: set ADMIN_PASSWORD_HASH in the Environment page.", 503)
-        who, t = _client(), time.time()
-        _fails[who] = [x for x in _fails.get(who, []) if t - x < 300]
-        if len(_fails[who]) >= 8:
-            return Response("Too many wrong attempts. Try again in 5 minutes.", 429)
-        auth = request.authorization
-        ok = bool(auth) and hmac.compare_digest(auth.username or "", ADMIN_USER) and check_password_hash(ADMIN_PASSWORD_HASH, auth.password or "")
-        if not ok:
-            if auth: _fails[who].append(t)
-            return Response("Sign in required", 401, {"WWW-Authenticate": 'Basic realm="MURYA admin"'})
-        return f(*a, **k)
+        if session.get("admin") and time.time() - session.get("t", 0) < SESSION_HOURS * 3600:
+            return f(*a, **k)
+        session.pop("admin", None)
+        if request.method == "GET": return redirect("/login")
+        return Response("Please sign in again.", 401)
     return wrapper
 
 def csrf_token():
@@ -297,7 +346,7 @@ h1{color:#0a7e07;font-size:22px}table{width:100%;border-collapse:collapse;font-s
 td{padding:6px;border-bottom:1px solid #ddd;vertical-align:top}.btn{background:#0a7e07;color:#fff;padding:8px 12px;border-radius:8px;border:none;cursor:pointer}
 .del{background:#b91c1c}input[type=text]{padding:8px;width:60%;border:1px solid #888;border-radius:8px}.ok{color:#166534}.bad{color:#b91c1c}
 .note{font-size:12px;color:#4a5d52}</style></head><body>
-<div class="card"><h1>MURYA questions and reports · Bauchi</h1>
+<div class="card"><form action="/logout" method="post" style="float:right"><button class="btn" type="submit">Log out</button></form><h1>MURYA questions and reports · Bauchi</h1>
 <p>{{ count }} report(s) · kept {{ days }} days · <a href="/export">Export CSV (no phone numbers)</a><br>
 {% if sms_ready %}<span class="ok">SMS ready as {{ sender }}</span>{% else %}<span class="bad">SMS not ready: add AT_USERNAME and AT_API_KEY in the Environment page</span>{% endif %}</p>
 <p class="note">These are what citizens typed. Do not treat them as verified. Never reply with names or personal details. Hooked Hausa letters in an SMS shorten how much fits in one message.</p></div>

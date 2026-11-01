@@ -990,7 +990,7 @@ def wa_link(text): return "https://wa.me/?text=" + quote("MURYA Bauchi - " + tex
 # =====================================================================
 PAGES = ["Home", "Ask", "Verified Info", "Polling Units", "Learn", "Dashboard", "Responsible AI", "Privacy", "Admin", "Contact"]
 defaults = {"nav": "Home", "voice_key": 0, "notice": None, "is_admin": False, "fails": 0, "lock_until": 0.0,
-            "login_msg": "", "sid": uuid.uuid4().hex[:8], "consent": False}
+            "login_msg": "", "sid": uuid.uuid4().hex[:8], "consent": False, "started": datetime.now().strftime("%H:%M:%S")}
 try:
     _qp = st.query_params
     if _qp.get("page") in PAGES: defaults["nav"] = _qp.get("page")
@@ -1262,8 +1262,13 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 def _nav_changed(): st.session_state.nav = st.session_state.nav_w
 if st.session_state.nav not in PAGES: st.session_state.nav = "Home"
-st.radio("Navigation", PAGES, index=PAGES.index(st.session_state.nav), key="nav_w", on_change=_nav_changed,
-         horizontal=True, label_visibility="collapsed", format_func=lambda p_: tx("nav_" + p_.replace(" ", "_")))
+# The menu keeps the same identity in every language (fixed labels, no "index"), so a language change cannot reset it to Home.
+def _nav_label(p_):
+    ha, en, _ = UI["nav_" + p_.replace(" ", "_")]
+    return en if ha == en else f"{ha} · {en}"
+if st.session_state.get("nav_w") != st.session_state.nav: st.session_state["nav_w"] = st.session_state.nav
+st.radio("Navigation", PAGES, key="nav_w", on_change=_nav_changed,
+         horizontal=True, label_visibility="collapsed", format_func=_nav_label)
 page = st.session_state.nav
 _lc1, _lc2 = st.columns([3, 2])
 with _lc1:
@@ -1416,8 +1421,8 @@ elif page == "Ask":
         with ct:
             lang = st.session_state.lang_choice    # chosen with the language switch at the top of the page
             st.caption(tx("lang_caption", lang=lang))
-            ph = tx("ph")
-            st.text_area("Tambayarka", placeholder=ph, key="q_box", height=80, label_visibility="collapsed", max_chars=500)
+            st.caption("✏️ " + tx("ph"))
+            st.text_area("Tambayarka", placeholder="…", key="q_box", height=80, label_visibility="collapsed", max_chars=500)
             st.button(tx("send"), use_container_width=True, type="primary", on_click=send_text)
         with cv:
             st.caption(tx("voice_cap"))
@@ -2003,3 +2008,8 @@ st.markdown(f"""
 {tx("foot_l1")}<br>
 {tx("foot_l2")}</div>
 """, unsafe_allow_html=True)
+try:
+    if st.query_params.get("debug") == "1":
+        st.caption(f"debug · session {SID} · started {st.session_state.get('started', '?')} · page {page} · language {st.session_state.get('lang_choice')}")
+except Exception:
+    pass
