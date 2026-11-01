@@ -119,6 +119,15 @@ No voter register, names or PVC numbers are used. Only public, synthetic or expr
 - A person's own polling unit is confirmed on their PVC or with INEC. The finder lists units in a ward.
 - The pilot is small and not statistically representative.
 
+### Assumptions
+
+- INEC's published office directory and election timetable were correct when checked, and are re-checked before launch.
+- A trained reviewer is available to approve answers within a reasonable time.
+- Citizens can reach at least one channel: the web app, a basic phone through USSD/SMS, or a person who helps them.
+- Most people follow the instruction not to share personal numbers, and the number removal catches most of the rest.
+- Pilot volunteers are adults who agree to take part, and use only test or public information.
+- Native speakers are available to review Hausa and Fulfulde wording.
+
 ## 8. Pathway to further development
 
 1. Agree with INEC Bauchi who verifies content, and refresh it from official sources.
@@ -152,6 +161,18 @@ Without any keys the app still works in human-only mode.
 **Files:** `app.py` (the whole app), `murya.db` (created on first run), `voice_audio/` (recorded answer clips), `voice_notes/` (incoming and reply audio), `assets/inec_logo.png` (optional INEC logo, shown only as a source badge).
 
 **Admin:** open the Admin page and sign in. Queue: review and publish. Fact base: edit and confirm facts, and add English and Fulfulde versions. Voice clips: record Hausa and Fulfulde audio. Polling units: import the INEC list. Languages: approve Fulfulde. Data and privacy: export, purge.
+
+## Alignment with the programme's key principles
+
+| Principle | How MURYA meets it | Status |
+|---|---|---|
+| Build nonpartisan solutions | No opinions on parties, candidates or results; partisan content is flagged for the reviewer; no persuasion features | Done |
+| Use synthetic, public or properly authorised data | INEC's public office directory and timetable; the polling-unit list only with INEC's written permission; no voter register, names or PVC numbers | Done; permission letter for the polling-unit list |
+| Never access, test or interfere with live electoral systems | MURYA connects to no INEC system; USSD runs in the Africa's Talking simulator only | Done |
+| Keep humans involved in decisions | A person approves every published answer; AI only transcribes, matches or drafts | Done |
+| Develop working prototypes | Web app, USSD/SMS service, polling-unit finder, reviewer tools | Done |
+| Document limitations, assumptions and risks | Limitations and Assumptions in this README, `MODEL_CARD.md`, `THREAT_MODEL.md` | Done |
+| Respect data protection, security, accessibility and open-source requirements | Data-protection note, redaction, 30-day deletion, audit log; PageSpeed accessibility 96; **open-source licence still to add** | In progress |
 
 ## 10. Credits
 
