@@ -323,9 +323,35 @@ CONCEPTS = {
 CONCEPT_OF = {w: c for c, ws in CONCEPTS.items() for w in ws}
 GENERIC = {"yaya", "how", "much", "many", "tell", "give", "need", "want", "know", "use", "able", "make", "take", "see", "find", "show"}
 
-def mtoks(text: str) -> set:
+def _osa(a, b, maxd):
+    """Edit distance between two words (swapping two neighbouring letters counts as one edit). Returns maxd+1 if farther than maxd."""
+    if abs(len(a) - len(b)) > maxd: return maxd + 1
+    prev2, prev = None, list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        cur = [i] + [0] * len(b)
+        for j in range(1, len(b) + 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] != b[j - 1]))
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                cur[j] = min(cur[j], prev2[j - 2] + 1)
+        prev2, prev = prev, cur
+    return prev[-1]
+
+def near_word(w, vocab):
+    """The closest known word for a probably mistyped word (only words of 5+ letters are ever corrected)."""
+    if len(w) < 5 or w in vocab: return None
+    maxd = 1 if len(w) < 8 else 2
+    best, bd = None, maxd + 1
+    for v in sorted(vocab):
+        d = _osa(w, v, maxd)
+        if d < bd: best, bd = v, d
+    return best if bd <= maxd else None
+
+def mtoks(text: str, vocab=()) -> set:
     out = set()
     for w in re.findall(r"[a-z0-9]+", norm(text)):
+        if vocab and w not in CONCEPT_OF:
+            fixed = near_word(w, vocab)
+            if fixed: w = fixed
         c = CONCEPT_OF.get(w)
         if c: out.add(c); continue
         if len(w) <= 2 or w in STOP or w in GENERIC: continue
@@ -350,6 +376,8 @@ def kb_match(question: str, kb: list):
     if not kb: return None, 0.0
     # each FAQ is described by its Hausa question, English question (if any) and keywords
     docs = [mtoks(f"{k['q']} {k.get('q_en') or ''} {k.get('keywords') or ''}") for k in kb]
+    vocab = set(CONCEPT_OF) | {w for k in kb for w in re.findall(r"[a-z0-9]+", norm(f"{k['q']} {k.get('q_en') or ''} {k.get('keywords') or ''}")) if len(w) >= 5}
+    qt = mtoks(question, vocab) or qt     # forgive typos: a mistyped word is matched to the closest word the app knows
     n = len(docs)
     df = {}
     for d in docs:
