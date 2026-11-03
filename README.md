@@ -93,16 +93,16 @@ No voter register, names or PVC numbers are used. Only public, synthetic or expr
 | Median time from question to approved reply | | min |
 | Hausa speech-to-text word error rate (20 recordings) | | % |
 
-**Accessibility audit.** Google PageSpeed Insights (Lighthouse), mobile, home page, 31 Oct 2026: **Accessibility 96**, Best Practices 100, SEO 92, Performance 92. The one failing accessibility check was colour contrast (small grey text); a fix darkens that text. *(Fill in: the score after re-testing, and the other pages tested.)* Automatic checks find only part of the problems, so manual checks (screen reader, large text, high contrast) are still needed.
+**Accessibility audit.** *(Fill in: Lighthouse accessibility score and what was fixed.)*
 
 ## 6. Responsible AI, privacy and security
 
 - **Human in the loop.** No answer is published without a person. AI only transcribes, matches or drafts.
 - **Non-partisan.** MURYA never gives opinions on parties, candidates or results; partisan content is flagged.
 - **Consent.** Citizens agree before anything is stored. A data-protection note (Hausa and English) follows the principles of the Nigeria Data Protection Act 2023. It has not yet had a legal review.
-- **Data minimisation.** No names, PVC numbers or phone numbers are requested, and any phone-style number, long ID number or email address a citizen types is removed before the message is saved. Polling-unit searches are not saved.
+- **Data minimisation.** No names, PVC numbers or phone numbers are requested. Polling-unit searches are not saved.
 - **Retention and deletion.** Messages and voice notes are deleted automatically after 30 days (configurable). Citizens can delete their own messages during their visit.
-- **Access.** Citizens see only their own messages. Public pages show totals and approved answers only. Admin uses a salted PBKDF2-SHA256 hash (200,000 iterations) kept in secrets, a lockout after 5 wrong attempts that counts across all sessions, a required reviewer name, and an audit log of who did what (never message text). Messages are rate-limited to 15 per hour per session. Exports are anonymised.
+- **Access.** Citizens see only their own messages. Public pages show totals and approved answers only. Admin uses a salted PBKDF2-SHA256 hash (200,000 iterations) with lockout after 5 wrong attempts. Messages are rate-limited to 15 per hour per session. Exports are anonymised.
 - **Third parties (only when switched on).** Voice goes to a speech-to-text provider, question text to an AI drafting service, and answer text to Google for reading aloud. These may process data outside Nigeria.
 - **Climate resilience.** USSD/SMS works without mobile data, which matters when floods disrupt networks. Flood-linked rumours about postponed elections are flagged.
 
@@ -113,20 +113,11 @@ No voter register, names or PVC numbers are used. Only public, synthetic or expr
 - Text-to-speech has no Hausa voice. Recorded clips are needed for good Hausa audio.
 - The Fulfulde wording needs a native speaker's approval before it goes live.
 - The USSD/SMS prototype runs in the Africa's Talking simulator only. A live short code and sender ID need operator approval.
-- One shared admin password (reviewer names are typed, not verified). One reviewer is a bottleneck.
+- One admin password and no audit log of who changed what. One reviewer is a bottleneck.
 - Free hosting can erase the database on restart; a managed database is needed for production.
 - Streamlit is heavy on 2G. USSD is the low-bandwidth path.
 - A person's own polling unit is confirmed on their PVC or with INEC. The finder lists units in a ward.
 - The pilot is small and not statistically representative.
-
-### Assumptions
-
-- INEC's published office directory and election timetable were correct when checked, and are re-checked before launch.
-- A trained reviewer is available to approve answers within a reasonable time.
-- Citizens can reach at least one channel: the web app, a basic phone through USSD/SMS, or a person who helps them.
-- Most people follow the instruction not to share personal numbers, and the number removal catches most of the rest.
-- Pilot volunteers are adults who agree to take part, and use only test or public information.
-- Native speakers are available to review Hausa and Fulfulde wording.
 
 ## 8. Pathway to further development
 
@@ -154,25 +145,12 @@ streamlit run app.py
 | `ANTHROPIC_API_KEY` | Turns on the AI draft button for reviewers |
 | `ANTHROPIC_MODEL`, `STT_MODEL` | Override the default models |
 | `RETENTION_DAYS` | Days before messages are deleted (default 30) |
-| `ADMIN_PW_SALT`, `ADMIN_PW_HASH` | Your admin password hash. Create them with `python make_admin_hash.py` |
 
 Without any keys the app still works in human-only mode.
 
 **Files:** `app.py` (the whole app), `murya.db` (created on first run), `voice_audio/` (recorded answer clips), `voice_notes/` (incoming and reply audio), `assets/inec_logo.png` (optional INEC logo, shown only as a source badge).
 
 **Admin:** open the Admin page and sign in. Queue: review and publish. Fact base: edit and confirm facts, and add English and Fulfulde versions. Voice clips: record Hausa and Fulfulde audio. Polling units: import the INEC list. Languages: approve Fulfulde. Data and privacy: export, purge.
-
-## Alignment with the programme's key principles
-
-| Principle | How MURYA meets it | Status |
-|---|---|---|
-| Build nonpartisan solutions | No opinions on parties, candidates or results; partisan content is flagged for the reviewer; no persuasion features | Done |
-| Use synthetic, public or properly authorised data | INEC's public office directory and timetable; the polling-unit list only with INEC's written permission; no voter register, names or PVC numbers | Done; permission letter for the polling-unit list |
-| Never access, test or interfere with live electoral systems | MURYA connects to no INEC system; USSD runs in the Africa's Talking simulator only | Done |
-| Keep humans involved in decisions | A person approves every published answer; AI only transcribes, matches or drafts | Done |
-| Develop working prototypes | Web app, USSD/SMS service, polling-unit finder, reviewer tools | Done |
-| Document limitations, assumptions and risks | Limitations and Assumptions in this README, `MODEL_CARD.md`, `THREAT_MODEL.md` | Done |
-| Respect data protection, security, accessibility and open-source requirements | Data-protection note, redaction, 30-day deletion, audit log; PageSpeed accessibility 96; **open-source licence still to add** | In progress |
 
 ## 10. Credits
 
