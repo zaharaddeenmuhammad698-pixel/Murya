@@ -1,18 +1,33 @@
-# MURYA
+# MURYA - Muryar Zabe | Voice of the Election
 
-> MURYA is a verified INEC civic information platform for Bauchi State. Provides trusted information in Hausa, Fulfulde and English. Features voice reporting, LGA INEC offices verification, and citizen engagement.
+> MURYA is a verified civic information platform for Bauchi State, Nigeria. Provides trusted INEC information in Hausa, Fulfulde and English. Features voice reporting, LGA verification, human-approved helpdesk, and citizen engagement for 5.1M voters across 20 LGAs.
 
-## What is MURYA
-- Name: MURYA means VOICE in Hausa
-- Purpose: Connect citizens to verified INEC services and civic info
-- Languages: Hausa, Fulfulde, English
-- Coverage: All 20 LGAs of Bauchi State
+## About
+- **Name:** MURYA means VOICE in Hausa
+- **Purpose:** Connect citizens to verified government services and civic info
+- **Languages:** Hausa, Fulfulde, English
+- **Coverage:** All 20 LGAs of Bauchi State - Bauchi, Toro, Alkaleri, Misau, Katagum, Jama'are, and 14 more
+- **Team:** Bauchi, Bauchi State - Built for AI4Elections Track 3
+- **Author:** Zaharaddeen Muhammad
 
 ## Features
-- Voice Reporting (Hausa Voice)
-- Verified INEC Information (Shield check)
-- Voting & Civic Engagement
-- LGA offices-based verification
+- Voice Reporting (Hausa Voice Input/Output with gTTS)
+- Verified Information from inec.gov.ng (human-approved)
+- Voting & Civic Engagement Dashboard (aggregates only, no PII)
+- LGA-based verification and search
+- Privacy: consent screen, delete button, auto-scrub of phone numbers
+- Responsible AI: AI suggests draft, human publishes
 
-## Official Site
-https://murya-engrdeeno.streamlit.app
+## Official Links
+- Live Demo: [https://murya-engrdeeno.streamlit.app](https://murya-engrdeeno.streamlit.app)
+- GitHub: [https://github.com/zaharaddeenmuhammad-pixel/MURYA](https://github.com/zaharaddeenmuhammad-pixel/MURYA)
+- INEC Official: [https://www.inecnigeria.org](https://www.inecnigeria.org)
+- Voters Portal: [https://voters.inecnigeria.org](https://voters.inecnigeria.org)
+
+## Technology
+- Stack: Python, Streamlit, Supabase Postgres, Sentence Transformers multilingual embeddings
+- Security: Phone number auto-scrub (070...), PU code (04-05-03-001), audit log
+- Compliance: Nonpartisan, public data only, no live electoral system access, human-in-loop
+
+## Contact
+Independent civic-tech project. Not an official INEC product. For verification, visit [inec.gov.ng](https://www.inec.gov.ng).
