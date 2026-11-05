@@ -1139,6 +1139,8 @@ UI = {
  "pu_none": ("Ana jiran jerin rumfunan zabe daga INEC.", "The polling-unit list from INEC is being added.", None),
  "pu_conf": ("✅ An tabbatar da INEC · Tushe: {src} · Jerin ya kai ranar {asof}", "✅ Confirmed by INEC · Source: {src} · List as of {asof}", None),
  "pu_prov": ("⏳ Ana jiran tabbatarwa daga INEC · Tushe: {src} · Jerin ya kai ranar {asof}", "⏳ Awaiting INEC confirmation · Source: {src} · List as of {asof}", None),
+ "pu_synth": ("⚠️ BAYANAN MISALI NE: waɗannan rumfunan zabe an ƙirƙire su ne don nuna yadda manhajar ke aiki. Ba na gaske ba ne. Kada ka yi amfani da su don neman rumfarka ta gaske. Ka duba katin zabe ko ka tambayi INEC.",
+              "⚠️ SAMPLE DATA: these polling units are made up to show how the app works. They are not real. Do not use them to find your real polling unit. Check your PVC or ask INEC.", None),
  "pu_mode": ("Yadda za ka nema", "How to search", None),
  "pu_mode_ward": ("Ta unguwa", "By ward", None), "pu_mode_code": ("Ta lamba ko suna", "By code or name", None),
  "pu_lga": ("Karamar hukuma", "LGA", None), "pu_ward": ("Unguwa", "Ward", None),
@@ -1668,8 +1670,11 @@ elif page == "Polling Units":
         if IS_ADMIN: st.caption("Admin: import the INEC file in Admin > Polling units.")
     else:
         asof, src_pu, conf_pu = pu_meta("asof") or "n/a", pu_meta("source") or "INEC", pu_meta("confirmed") == "1"
-        banner = tx("pu_conf" if conf_pu else "pu_prov", src=esc(src_pu), asof=esc(asof))
-        st.markdown(f'<div class="{"bf" if conf_pu else "bf prov"}">{banner}</div>', unsafe_allow_html=True)
+        if pu_meta("synthetic") == "1":
+            st.markdown(f'<div class="bf prov" style="border:2px solid #b45309;"><b>{tx("pu_synth")}</b></div>', unsafe_allow_html=True)
+        else:
+            banner = tx("pu_conf" if conf_pu else "pu_prov", src=esc(src_pu), asof=esc(asof))
+            st.markdown(f'<div class="{"bf" if conf_pu else "bf prov"}">{banner}</div>', unsafe_allow_html=True)
         wlabel(tx("pu_mode"))
         if st.session_state.get("pu_mode_store") not in ("ward", "code"): st.session_state.pu_mode_store = "ward"
         def _pum(): st.session_state.pu_mode_store = st.session_state.pu_mode_w
@@ -1956,7 +1961,7 @@ elif page == "Admin":
             n_pu = pu_count()
             if n_pu:
                 st.success(f"{n_pu} polling units loaded · list as of {pu_meta('asof') or 'date not set'} · source: {pu_meta('source') or 'n/a'} · "
-                           + ("CONFIRMED by INEC" if pu_meta("confirmed") == "1" else "awaiting INEC confirmation"))
+                           + ("SYNTHETIC (demonstration data)" if pu_meta("synthetic") == "1" else "CONFIRMED by INEC" if pu_meta("confirmed") == "1" else "awaiting INEC confirmation"))
             else:
                 st.info("No list loaded yet.")
             st.download_button("⬇️ Download the CSV template", "lga,ward,pu_code,pu_name\nEXAMPLE LGA,EXAMPLE WARD,00/00/00/000,EXAMPLE POLLING UNIT (delete this row)\n",
@@ -1965,15 +1970,16 @@ elif page == "Admin":
             asof_in = st.text_input("List as of (date)", value=pu_meta("asof"), key="pu_asof_in")
             src_in = st.text_input("Source", value=pu_meta("source") or "INEC Bauchi State Office", key="pu_src_in")
             perm = st.checkbox("I have INEC's written permission to use this list", key="pu_perm")
+            synth_in = st.checkbox("This list is SYNTHETIC (made up for demonstration, not real polling units)", value=pu_meta("synthetic") == "1", key="pu_synth_in")
             if up_pu is not None and st.button("⬆️ Import (replaces the current list)", key="pu_import"):
-                if not perm: st.warning("Tick the permission box first.")
+                if not (perm or synth_in): st.warning("Tick the permission box, or tick that the list is synthetic.")
                 else:
                     try:
                         rows_pu, mapping, skipped = pu_parse(pu_read_upload(up_pu))
                     except Exception as e:
                         rows_pu, mapping, skipped = [], {}, 0; st.error(f"Could not read that file ({type(e).__name__}). For Excel, try saving it as CSV.")
                     if rows_pu:
-                        pu_replace(rows_pu); pu_set_meta("asof", asof_in.strip()); pu_set_meta("source", src_in.strip()); pu_set_meta("confirmed", "0")
+                        pu_replace(rows_pu); pu_set_meta("asof", asof_in.strip()); pu_set_meta("source", src_in.strip()); pu_set_meta("confirmed", "0"); pu_set_meta("synthetic", "1" if synth_in else "0")
                         st.success(f"Imported {len(rows_pu)} polling units ({skipped} rows skipped). Columns used: {mapping}"); st.rerun()
                     elif mapping:
                         st.error(f"Could not find LGA, ward and name/code columns. I saw: {mapping}. Rename the headings to lga, ward, pu_code, pu_name.")
@@ -1981,7 +1987,7 @@ elif page == "Admin":
             c_pu = st.columns(2)
             with c_pu[0]:
                 if st.button("💾 Save date, source and confirmation", key="pu_save_meta"):
-                    pu_set_meta("asof", asof_in.strip()); pu_set_meta("source", src_in.strip()); pu_set_meta("confirmed", "1" if conf_in else "0"); st.rerun()
+                    pu_set_meta("asof", asof_in.strip()); pu_set_meta("source", src_in.strip()); pu_set_meta("confirmed", "1" if conf_in else "0"); pu_set_meta("synthetic", "1" if synth_in else "0"); st.rerun()
             with c_pu[1]:
                 if n_pu and st.button("🗑️ Delete the whole list", key="pu_clear"): pu_clear(); st.rerun()
             if n_pu:
