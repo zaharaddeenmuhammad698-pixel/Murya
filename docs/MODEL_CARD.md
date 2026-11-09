@@ -1,6 +1,6 @@
 # MURYA model card
 
-AI4Elections Hackathon 2026–2027 · Track 3 · Version 1.2 (prototype)
+AI4Elections Hackathon 2026–2027 · Track 3 · Version 1.3 (prototype)
 
 ## 1. System summary
 
@@ -13,7 +13,7 @@ MURYA (Muryar Zabe) is a voter-information helpdesk for Bauchi State. It is a **
 | Component | What it does | Provider / method | Required? |
 |---|---|---|---|
 | Answer matching | Finds the closest verified fact | Our own code: Hausa and English concept matching, word stems, rarity weighting, and a typo corrector that reads a mistyped word as the nearest known word (Python `difflib`) | Yes |
-| Office and polling-unit lookup | Shows an INEC office address, or the polling units in a ward | Database lookup from INEC's published directory and INEC's list; no machine learning | Yes |
+| Office and polling-unit lookup | Shows an INEC office address, or the polling units in a ward | Database lookup from INEC's published office directory and a synthetic polling-unit list; no machine learning | Yes |
 | Risk flags | Marks links, vote-buying, rumours (including flood-linked), phone numbers, party names | Regular-expression rules | Yes |
 | Number removal | Removes phone-style numbers, long ID numbers and emails before a message is saved | Regular-expression rules | Yes |
 | Speech-to-text | Turns Hausa or English voice notes into text for the reviewer | OpenAI Whisper (`whisper-1`) | Optional |
@@ -44,7 +44,8 @@ MURYA (Muryar Zabe) is a voter-information helpdesk for Bauchi State. It is a **
 |---|---|---|---|
 | Verified FAQs | Written in Hausa from INEC guidance, with English and Fulfulde versions | 4 | Each has a source and review date |
 | INEC office addresses | INEC Bauchi State LGA directory, checked in person | 20 | Confirmed by the developer; INEC check requested |
-| Polling units | INEC Bauchi State Office, used with written permission | *(fill in: number loaded and list date)* | Shows the list date and whether INEC has confirmed it |
+| Polling units | **Synthetic** (real LGA names; made-up wards and units named SAMPLE; codes start with 00) | *(fill in: number loaded)* | Labelled "SAMPLE DATA" on the page; not for real use |
+| Accessibility-barriers survey | **Synthetic** (the organisers' file, and a Bauchi version made for MURYA) | 500 + 500 | Shown on the Dashboard with a SYNTHETIC SAMPLE banner; not used to train or tune anything; no real pattern |
 | USSD screens | The same verified facts as the web app, shortened to fit the phone screen | 75 screens | All plain ASCII and within 182 characters |
 | Test questions | Written by the developer | 60 development + 37 noisy + 9 risk-flag tests | Not independent (see 6) |
 
@@ -99,6 +100,7 @@ What the noisy set found: the matcher was weaker than the baseline on spelling v
 - The web app is heavy on 2G. USSD is the low-bandwidth route.
 - Facts can go stale when INEC changes a date, an office or a polling unit. Every fact shows its source and review state.
 - The polling-unit finder lists the units in a ward. It does not know which unit is a particular voter's.
+- The accessibility-barriers section on the Dashboard reads made-up data. It shows how the page would work, not real findings about Bauchi voters.
 - One reviewer is a bottleneck. An audit log records who confirmed or published what in the web app, but reviewers type their own names. The USSD dashboard has no audit log yet.
 - The USSD service runs only in the simulator. Live use needs a registered short code and sender ID.
 - Third-party services may process data outside Nigeria when switched on.
@@ -106,7 +108,7 @@ What the noisy set found: the matcher was weaker than the baseline on spelling v
 ## 9. Human oversight and safeguards
 
 - A person approves every published answer. AI drafts are grounded in confirmed facts only, are never sent automatically, and show "grounded: no" when the facts do not cover the question.
-- Office answers show "awaiting human confirmation" until a person confirms them. The polling-unit list shows its date and whether INEC has confirmed it.
+- Office answers show "awaiting human confirmation" until a person confirms them. The polling-unit list is synthetic, and the page says so in a banner, so nobody mistakes it for a real list.
 - The Fulfulde text stays hidden from citizens until a native speaker approves it.
 - USSD questions and reports are answered by a person from a password-protected dashboard.
 - Risky messages are flagged for the reviewer, never silently blocked or auto-answered. Phone-style numbers, long ID numbers and email addresses are removed before a message is stored.
@@ -128,11 +130,11 @@ What the noisy set found: the matcher was weaker than the baseline on spelling v
 
 ## 11. Maintenance
 
-Re-verify each fact and the polling-unit list against INEC on a fixed schedule and before any election milestone. Review the risk-flag rules weekly during the election period. Re-run the self-test and `compare_retrieval.py` after any change to the facts or the matcher, and add real questions from the pilot to the test sets.
+Re-verify each fact against INEC on a fixed schedule and before any election milestone. Review the risk-flag rules weekly during the election period. Re-run the self-test and `compare_retrieval.py` after any change to the facts or the matcher, and add real questions from the pilot to the test sets.
 
 ## 12. Licence and credits
 
-Licence: *(to be added)*. Third-party libraries keep their own licences. The INEC logo and INEC's polling-unit list are not covered by MURYA's licence and are used with INEC's permission.
+Licence: *(to be added)*. Third-party libraries keep their own licences. The INEC logo is not covered by MURYA's licence and is used with INEC's permission. The synthetic polling-unit data and its generator are covered by it.
 
 ## 13. Contact
 
