@@ -27,7 +27,7 @@ flowchart LR
 |---|---|
 | Interface | Pages: Home, Ask, Verified Info, Polling Units, Learn, Dashboard, Responsible AI, Privacy, Admin, Contact. A language layer (`tx`) gives Hausa, English and Fulfulde text. Large text and high contrast switches. The page and language are kept in the web address so a dropped connection returns to the same place |
 | Matching (pure functions) | `norm`, `mtoks`, `kb_match`, `lga_hit`, `risk_flags`, `redact`. No Streamlit calls, so they run offline in tests. Concept matching joins Hausa and English words; a typo corrector reads a close misspelling as the nearest known word; a hand-over happens when nothing fits |
-| Data (SQLite, `murya.db`) | `questions`, `kb` (verified facts with English and Fulfulde versions), `polling_units`, `pu_meta`, `audit_log`, `login_attempts` |
+| Data (SQLite, `murya.db`) | `questions`, `kb` (verified facts with English and Fulfulde versions), `polling_units`, `pu_meta`, `audit_log`, `login_attempts`. A `data/` folder holds the synthetic accessibility-barriers survey that the Dashboard reads |
 | Optional AI | Whisper speech-to-text and an Anthropic draft assistant, both off unless a key is set. Drafts use confirmed facts only and are never sent automatically |
 | Voice output | Recorded Hausa and Fulfulde clips (`voice_audio/`), server voice (gTTS) for English, and the phone's own voice as a fallback |
 | Security | Admin hash read from secrets, sign-in lockout counted in the database, reviewer names, audit log, 30-day deletion, redaction of numbers before storing |
