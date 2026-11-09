@@ -44,6 +44,8 @@ Each method's hand-over threshold is chosen on the development set only, then ev
 | Lighthouse (mobile, home page, 31 Oct 2026) | Accessibility 96, Best Practices 100, SEO 92, Performance 92 |
 | Sign-in service | Tested for wrong password, wrong user name, capital letter, trailing spaces, quote marks around the hash, a damaged hash, a blocked cookie, lockout, reply and logout |
 | Number removal | Phone-style numbers, long ID numbers and emails removed; polling-unit codes and dates left alone |
+| Synthetic polling units | A generated list of 1,314 SAMPLE units in 20 LGAs imports cleanly; the Polling Units page shows the SAMPLE DATA banner in Hausa, English and Fulfulde; a real list shows the normal banner |
+| Barriers section | Filters by LGA and by language tested for the Bauchi file (25 per LGA, Hausa/Fulfulde/English) and the organisers' file (state filter); the SYNTHETIC SAMPLE banner shows in every case; a missing file shows a note instead of an error |
 
 ## 5. Still to measure
 
