@@ -59,7 +59,12 @@ if not ADMIN_PASSWORD_HASH:
     print("WARNING: ADMIN_PASSWORD_HASH is not set, so the dashboard is switched off.")
 
 # ---- Database (SQLite: safe for several requests at once, unlike a JSON file) ----
+DATABASE_URL = os.environ.get("DATABASE_URL", "")   # set it to store data in Supabase (Postgres); leave it empty to use the local SQLite file
+
 def db():
+    if DATABASE_URL:
+        import pgcompat
+        return pgcompat.connect(DATABASE_URL)
     c = sqlite3.connect(DB_PATH, timeout=10)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA journal_mode=WAL")

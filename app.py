@@ -588,7 +588,21 @@ os.makedirs("voice_audio", exist_ok=True)   # recorded Hausa answers, e.g. voice
 RATE_LIMIT_PER_HOUR = 15
 NOW = lambda: datetime.now().strftime("%Y-%m-%d %H:%M")
 
+DATABASE_URL = secret("DATABASE_URL", "")   # set it to store data in Supabase (Postgres); leave it empty to use the local SQLite file
+
+@st.cache_resource
+def _done_flags(): return set()
+def _once(name, fn):
+    """With a remote database, run each set-up step once per server process instead of on every page refresh."""
+    if not DATABASE_URL: return fn()
+    flags = _done_flags()
+    if name not in flags:
+        fn(); flags.add(name)
+
 def _conn():
+    if DATABASE_URL:
+        import pgcompat
+        return pgcompat.connect(DATABASE_URL)
     c = sqlite3.connect(DB, timeout=10)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA journal_mode=WAL")
@@ -652,14 +666,14 @@ def init_db():
                 sid = re.search(r"_([0-9a-f]{8})\.wav$", f)
                 c.execute("INSERT INTO questions(q,created,sid,kind,audio) VALUES('',?,?,'voice',?)",
                           (f"{m.group(1)} {m.group(2)}:{m.group(3)}" if m else NOW(), sid.group(1) if sid else "", f))
-init_db()
+_once("init_db", init_db)
 
 # --- Security tables: audit log (who did what, never message text) and failed-login counter ---
 def sec_init():
     with _conn() as c:
         c.execute("CREATE TABLE IF NOT EXISTS audit_log(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, actor TEXT, action TEXT, target TEXT, detail TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS login_attempts(ts REAL)")
-sec_init()
+_once("sec_init", sec_init)
 
 def audit(action, target="", detail="", actor=None):
     """Record who did what. Never put citizens' message text in here."""
@@ -767,7 +781,7 @@ def pu_init():
         c.execute("CREATE TABLE IF NOT EXISTS polling_units(id INTEGER PRIMARY KEY AUTOINCREMENT, lga TEXT, ward TEXT, pu_code TEXT, pu_name TEXT)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_pu_lw ON polling_units(lga, ward)")
         c.execute("CREATE TABLE IF NOT EXISTS pu_meta(k TEXT PRIMARY KEY, v TEXT)")
-pu_init()
+_once("pu_init", pu_init)
 def pu_meta(k, d=""):
     with _conn() as c:
         r = c.execute("SELECT v FROM pu_meta WHERE k=?", (k,)).fetchone()
@@ -892,7 +906,7 @@ def redact_existing():
                 if "number-removed" not in fl: fl.append("number-removed")
                 c.execute("UPDATE questions SET q=?, flags=? WHERE id=?", (clean, ",".join(fl), r["id"]))
         c.execute("INSERT OR REPLACE INTO pu_meta(k,v) VALUES('redacted_v1','1')")
-redact_existing()
+_once("redact_existing", redact_existing)
 
 # =====================================================================
 # AI LAYER (optional: works without keys, falls back to human-only mode)
@@ -1782,7 +1796,7 @@ elif page == "Privacy":
         <p><b>Abin da muke tarawa:</b> tambayarka (rubutu ko murya), harshen da ka zaɓa, lokacin aikawa, da lambar zama ta bazuwar wadda ba ta nuna ko kai wanene. Ba ma neman sunanka, lambar waya, lambar PVC ko adireshin gida.</p>
         <p><b>Dalili:</b> domin mutum ya amsa tambayarka, da kuma nuna alkaluma gaba ɗaya ba tare da sunan kowa ba.</p>
         <p><b>Wanda ke gani:</b> kai da masu duba MURYA kaɗai. Shafukan jama'a suna nuna amsoshin da aka amince da su ne kawai, ba tare da bayananka ba.</p>
-        <p><b>Hidimomin waje:</b> idan ka danna 🔊 a kan tambayarka, ana aika rubutun zuwa sabis ɗin karatun sauti na Google. Idan an kunna rubuta murya, ana aika muryarka zuwa OpenAI don maida ta rubutu (ba ya aiki ga Fulfulde). Idan an kunna taimakon AI, ana aika rubutun tambayar zuwa kamfanin AI don rubuta amsar da mutum zai duba.</p>
+        <p><b>Hidimomin waje:</b> idan ka danna 🔊 a kan tambayarka, ana aika rubutun zuwa sabis ɗin karatun sauti na Google. Idan an kunna rubuta murya, ana aika muryarka zuwa OpenAI don maida ta rubutu (ba ya aiki ga Fulfulde). Idan an kunna taimakon AI, ana aika rubutun tambayar zuwa kamfanin AI don rubuta amsar da mutum zai duba. Ana adana saƙonni a uwar garken manhajar ko, idan an kunna zaɓin ma'ajiyar gajimare, a ma'ajiyar Supabase wadda za ta iya kasancewa a wajen Najeriya.</p>
         <p><b>Tsawon ajiya:</b> ana goge saƙonni ta atomatik bayan kwana {RETENTION_DAYS}. Kana iya goge naka a kowane lokaci da danna ɗaya a shafin Ask.</p>
         <p><b>Neman rumfar zabe:</b> ba a ajiye abin da ka nema. Ba ma tambayar lambar PVC ko lambar waya.</p>
         <p><b>Kada ka raba:</b> lambar PVC, lambar waya ko adireshin gida. Idan sakonka ya ƙunshi lamba ko imel, MURYA tana cire su kafin ta ajiye shi. Muryar da ka yi tana iya ɗauke da bayanai; ana goge ta bayan kwana 30.</p>
@@ -1792,7 +1806,7 @@ elif page == "Privacy":
         <p><b>What we collect:</b> your question (text or voice recording), the language you chose, the time you sent it, and a random session code that does not reveal who you are. We do not ask for your name, phone number, PVC number or home address.</p>
         <p><b>Why:</b> so a person can answer your question, and to show anonymous totals.</p>
         <p><b>Who sees it:</b> you and the MURYA reviewers only. Public pages show approved answers without your details.</p>
-        <p><b>Outside services:</b> if you tap 🔊 on your own question, that text is sent to Google's text-to-speech service. If speech-to-text is switched on, your recording is sent to OpenAI to turn it into text (not available for Fulfulde). If AI drafting is switched on, the question text is sent to an AI provider to draft a reply that a person then checks.</p>
+        <p><b>Outside services:</b> if you tap 🔊 on your own question, that text is sent to Google's text-to-speech service. If speech-to-text is switched on, your recording is sent to OpenAI to turn it into text (not available for Fulfulde). If AI drafting is switched on, the question text is sent to an AI provider to draft a reply that a person then checks. Messages are stored on the app's own server or, if the cloud-database option is on, in a Supabase database that may be outside Nigeria.</p>
         <p><b>How long we keep it:</b> messages are deleted automatically after {RETENTION_DAYS} days. You can delete yours at any time with one tap on the Ask page.</p>
         <p><b>Polling-unit search:</b> what you search for is not saved. We do not ask for your PVC or phone number.</p>
         <p><b>Please do not share:</b> your PVC number, phone number or home address. If a message contains a number or email address, MURYA removes it before saving. A voice note can still contain details you speak; it is deleted after 30 days.</p>
