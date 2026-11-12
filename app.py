@@ -1307,15 +1307,19 @@ st.markdown(f"""
 <div><div class="brand-name">MURYA</div><div class="brand-sub">{tx("brand_sub")}</div></div></div>
 <div class="pill-note">{tx("pill")}</div></div>
 """, unsafe_allow_html=True)
-def _nav_changed(): st.session_state.nav = st.session_state.nav_w
+# The page menu follows the chosen language. Each language has its own widget key, and the chosen page is put into the widget
+# (through session state) BEFORE it is drawn, so changing the language keeps you on the same page.
+def _nav_labels():
+    return [tx("nav_" + p_.replace(" ", "_")) for p_ in PAGES]
+def _nav_changed():
+    labels = _nav_labels()
+    picked = st.session_state.get("nav_w_" + st.session_state.get("lang_choice", "Hausa"))
+    if picked in labels: st.session_state.nav = PAGES[labels.index(picked)]
 if st.session_state.nav not in PAGES: st.session_state.nav = "Home"
-# The menu keeps the same identity in every language (fixed labels, no "index"), so a language change cannot reset it to Home.
-def _nav_label(p_):
-    ha, en, _ = UI["nav_" + p_.replace(" ", "_")]
-    return en if ha == en else f"{ha} · {en}"
-if st.session_state.get("nav_w") != st.session_state.nav: st.session_state["nav_w"] = st.session_state.nav
-st.radio("Navigation", PAGES, key="nav_w", on_change=_nav_changed,
-         horizontal=True, label_visibility="collapsed", format_func=_nav_label)
+_nav_key = "nav_w_" + st.session_state.get("lang_choice", "Hausa")
+_labels = _nav_labels()
+st.session_state[_nav_key] = _labels[PAGES.index(st.session_state.nav)]
+st.radio("Navigation", _labels, key=_nav_key, on_change=_nav_changed, horizontal=True, label_visibility="collapsed")
 page = st.session_state.nav
 _lc1, _lc2 = st.columns([3, 2])
 with _lc1:
@@ -1330,7 +1334,7 @@ with _lc2:
         st.checkbox("🔠 Babban rubutu · Large text", key="big_text")
         st.checkbox("◐ Launi mai ƙarfi · High contrast", key="hi_contrast")
 try:
-    if st.query_params.get("page") != page: st.query_params["page"] = page
+    if "page" in st.query_params: del st.query_params["page"]   # a new visit starts at the menu page; a ?page= link works once
     _l = st.session_state.get("lang_choice", "Hausa")
     if st.query_params.get("lang") != _l: st.query_params["lang"] = _l
 except Exception: pass
